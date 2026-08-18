@@ -59,7 +59,20 @@ export const initialMachineMetadata: MachineMetadata = {
   resumeSupport: { ...detectResumeSupport(), rpcAvailable: true },
 };
 
-export async function startDaemon(): Promise<void> {
+export interface StartDaemonOptions {
+  /**
+   * When true, the daemon resumes every session tracked in the on-disk
+   * persistence file right after coming online. Intended for environments
+   * where the daemon is auto-restarted (k8s pod restarts, systemd units,
+   * supervised containers) with `$HAPPY_HOME_DIR` on persistent storage.
+   * Off by default so interactive `happy daemon start` keeps its current
+   * behavior: persisted sessions stay as resume candidates awaiting a
+   * manual trigger from the mobile app.
+   */
+  autoResumePersisted?: boolean;
+}
+
+export async function startDaemon(opts: StartDaemonOptions = {}): Promise<void> {
   // The daemon may have been launched from a session process. Keep its normal
   // environment, but never let session lineage or reconnect state reach a
   // later, unrelated child session.
@@ -1032,6 +1045,43 @@ export async function startDaemon(): Promise<void> {
 
     // Connect to server
     apiMachine.connect();
+
+    // Auto-resume persisted sessions at daemon startup (opt-in).
+    // In environments like k8s where the pod is recreated and `$HAPPY_HOME_DIR`
+    // is on persistent storage, the persisted sessions file already contains
+    // everything resumeSession() needs. We re-enter the same code path the
+    // mobile app's resume-session RPC uses, so any hardening that lands on
+    // that function applies here too.
+    //
+    // Issued fire-and-forget with a small concurrency limit — resumeSession
+    // awaits network + cwd checks and we don't want a startup storm.
+    if (opts.autoResumePersisted) {
+      const persistedIds = Object.keys(persisted);
+      if (persistedIds.length > 0) {
+        logger.debug(`[DAEMON RUN] Auto-resuming ${persistedIds.length} persisted session(s)`);
+        const concurrency = Math.max(1, parseInt(process.env.HAPPY_AUTO_RESUME_CONCURRENCY || '4', 10));
+        void (async () => {
+          let cursor = 0;
+          const next = async (): Promise<void> => {
+            while (cursor < persistedIds.length) {
+              const id = persistedIds[cursor++];
+              try {
+                const result = await resumeSession(id);
+                if (result.type !== 'success') {
+                  logger.debug(`[DAEMON RUN] Auto-resume of ${id} did not succeed: ${JSON.stringify(result)}`);
+                }
+              } catch (error) {
+                logger.debug(`[DAEMON RUN] Auto-resume of ${id} threw: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            }
+          };
+          await Promise.all(Array.from({ length: Math.min(concurrency, persistedIds.length) }, () => next()));
+          logger.debug('[DAEMON RUN] Auto-resume sweep complete');
+        })();
+      } else {
+        logger.debug('[DAEMON RUN] Auto-resume requested but no persisted sessions found');
+      }
+    }
 
     // Every 60 seconds:
     // 1. Prune stale sessions

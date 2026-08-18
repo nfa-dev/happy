@@ -533,8 +533,13 @@ Conversation history is preserved on the server, but in-flight tool calls are in
       return
 
     } else if (daemonSubcommand === 'start') {
+      // Propagate --auto-resume through to the detached start-sync child so
+      // a user running `happy daemon start --auto-resume` gets the same
+      // behavior as running `happy daemon start-sync --auto-resume` directly.
+      const autoResume = args.includes('--auto-resume');
+      const childArgs = autoResume ? ['daemon', 'start-sync', '--auto-resume'] : ['daemon', 'start-sync'];
       // Spawn detached daemon process
-      const child = spawnHappyCLI(['daemon', 'start-sync'], {
+      const child = spawnHappyCLI(childArgs, {
         detached: true,
         stdio: 'ignore',
         env: sanitizeSessionEnvironment(process.env)
@@ -559,7 +564,8 @@ Conversation history is preserved on the server, but in-flight tool calls are in
       }
       process.exit(0);
     } else if (daemonSubcommand === 'start-sync') {
-      await startDaemon()
+      const autoResumePersisted = args.includes('--auto-resume');
+      await startDaemon({ autoResumePersisted })
       process.exit(0)
     } else if (daemonSubcommand === 'stop') {
       await stopDaemon()
