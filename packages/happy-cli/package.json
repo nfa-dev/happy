@@ -66,7 +66,7 @@
     "bundle:webapp": "node scripts/bundle-webapp.cjs",
     "build:capability": "sh scripts/build-capability.sh",
     "test:capability-lifetime": "node scripts/test-capability-parent-lifetime.cjs",
-    "build": "shx rm -rf dist && tsc --noEmit && pkgroll",
+    "build": "shx rm -rf dist && tsc --noEmit && pkgroll && node scripts/write-build-info.mjs",
     "test": "pnpm run build && vitest run --project unit",
     "test:integration": "pnpm run build && vitest run --project integration-empty --project integration-plan-mode --project integration-authenticated",
     "cli:install": "node scripts/install-local.cjs",

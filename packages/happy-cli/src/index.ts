@@ -13,6 +13,7 @@ import { logger } from './ui/logger'
 import { readCredentials, readSettings } from './persistence'
 import { authAndSetupMachineIfNeeded } from './ui/auth'
 import packageJson from '../package.json'
+import { describeBuild } from '@/buildInfo'
 import { z } from 'zod'
 import { startDaemon } from './daemon/run'
 import { checkIfDaemonRunningAndCleanupStaleState, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './daemon/controlClient'
@@ -788,7 +789,8 @@ ${chalk.bold.cyan('Claude Code Options (from `claude --help`):')}
 
     // Show version
     if (showVersion) {
-      console.log(`happy version: ${packageJson.version}`)
+      const build = describeBuild()
+      console.log(`happy version: ${packageJson.version}${build ? ` (${build})` : ''}`)
       // Don't exit - continue to pass --version to Claude Code
     }
 

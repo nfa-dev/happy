@@ -14,6 +14,7 @@ import { readDaemonState } from '@/persistence'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { projectPath } from '@/projectPath'
+import { describeBuild } from '@/buildInfo'
 import packageJson from '../../package.json'
 
 /**
@@ -228,7 +229,8 @@ export async function runDoctorCommand(): Promise<void> {
 
     // Basic info
     console.log(chalk.bold('\n📋 Basic Information'));
-    console.log(`Happy CLI Version: ${chalk.green(packageJson.version)}`);
+    const build = describeBuild();
+    console.log(`Happy CLI Version: ${chalk.green(packageJson.version)}${build ? chalk.gray(` (${build})`) : ''}`);
     console.log(`Platform: ${chalk.green(process.platform)} ${process.arch}`);
     console.log(`Node.js Version: ${chalk.green(process.version)}`);
 
