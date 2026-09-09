@@ -20,6 +20,7 @@ import { getAskUserQuestionToolCallIds } from "./utils/questionNotification";
 import { launchFailureMessage } from "./utils/launchFailureMessage";
 import { cleanupStdinAfterInk } from "@/utils/terminalStdinCleanup";
 import type { MessageParam, ContentBlockParam } from '@anthropic-ai/sdk/resources';
+import type { SessionTurnEndStatus } from '@slopus/happy-wire';
 
 interface PermissionsField {
     date: number;
@@ -119,6 +120,24 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
     const messageQueue = new OutgoingMessageQueue(
         (logMessage) => session.client.sendClaudeSessionMessage(logMessage)
     );
+
+    // A turn-end must never overtake the messages of its own turn. SDK
+    // assistant/user messages travel through messageQueue (async, and
+    // top-level tool calls are held up to 250ms), so a turn-end handed
+    // straight to the client can reach the server before the turn's final
+    // assistant text. The protocol mapper then opens a fresh turn for that
+    // late text — a turn-start with no user prompt that nothing ever closes.
+    // Consumers deriving busy/idle from turn events (happy-bridge) see a
+    // session that is "busy" forever. Route every turn-end through the same
+    // queue as an ordered control item instead. closeClaudeSessionTurn is a
+    // no-op when no turn is open, so redundant calls emit nothing.
+    const closeTurnOrdered = (status: SessionTurnEndStatus, reason: string) => {
+        messageQueue.enqueueControl(() => {
+            if (session.client.closeClaudeSessionTurn(status)) {
+                logger.debug(`[remote]: turn-end(${status}) sent — ${reason}`);
+            }
+        });
+    };
 
     // Set up callback to release delayed messages when permission is requested
     permissionHandler.setOnPermissionRequest((toolCallId: string) => {
@@ -310,6 +329,10 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
             abortFuture = new Future<void>();
             let modeHash: string | null = null;
             let mode: EnhancedMode | null = null;
+            // Abnormal turn end decided by the branches below; emitted in
+            // `finally` after the interrupted tool results so the order on the
+            // wire is: queued turn messages → tool-call-end → turn-end.
+            let closeStatus: SessionTurnEndStatus | null = null;
             try {
                 const remoteResult = await claudeRemote({
                     sessionId: session.sessionId,
@@ -342,6 +365,13 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             modeHash = msg.hash;
                             mode = msg.mode;
                             permissionHandler.handleModeChange(mode.permissionMode);
+                            // Self-heal: a fresh instruction always begins a new turn.
+                            // If a previous turn is somehow still open (a path that
+                            // missed its turn-end), close it now — ordered ahead of
+                            // the new turn's first message. No-op after a normal end.
+                            // Not applied to `pending` replays above: a mid-turn
+                            // account-switch retry deliberately continues its turn.
+                            closeTurnOrdered('completed', 'dangling turn closed before dispatch');
 
                             // Per-message attachments are already claimed by the message
                             // when it was pushed onto the queue, so there is no race window
@@ -429,11 +459,12 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                         session.clearSessionId();
                     },
                     onReady: async (status) => {
-                        // Assistant messages are queued until the next tick. Deliver
-                        // them before closing an auth-failed turn, or the close can
-                        // run before the mapper has even opened that turn.
+                        // Enqueued, not sent: the turn-end lands behind the turn's
+                        // own messages rather than overtaking them. The flush below
+                        // then delivers both before an auth-failed turn is handed
+                        // back, so the failure is on the wire in order.
+                        closeTurnOrdered(status ?? 'completed', 'result');
                         if (status === 'failed') await messageQueue.flush();
-                        session.client.closeClaudeSessionTurn(status ?? 'completed');
                         if (status !== 'failed' && !pending && session.queue.size() === 0) {
                             session.api.push().sendSessionNotification({
                                 kind: 'done',
@@ -453,15 +484,16 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                 session.consumeOneTimeFlags();
                 
                 if (!exitReason && abortController.signal.aborted) {
-                    session.client.closeClaudeSessionTurn('cancelled');
+                    closeStatus = 'cancelled';
                     session.client.sendSessionEvent({ type: 'message', message: 'Aborted by user' });
                 }
             } catch (e) {
                 logger.debug('[remote]: launch error', e);
                 if (!exitReason) {
+                    // `finally` closes the turn through the outgoing queue, so
+                    // this message still precedes the turn-end.
+                    closeStatus = 'failed';
                     const authMessage = claudeProviderAuthErrorMessage(e);
-                    if (authMessage) await messageQueue.flush();
-                    session.client.closeClaudeSessionTurn('failed');
                     session.client.sendSessionEvent({ type: 'message', message: authMessage ?? launchFailureMessage(e) });
                     continue;
                 }
@@ -469,15 +501,22 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
 
                 logger.debug('[remote]: launch finally');
 
-                // Terminate all ongoing tool calls
+                // Terminate all ongoing tool calls — through the queue, so the
+                // synthetic tool results land after the tool-call-start messages
+                // still waiting in it and before the turn-end below.
                 for (let [toolCallId, { parentToolCallId }] of ongoingToolCalls) {
                     const converted = sdkToLogConverter.generateInterruptedToolResult(toolCallId, parentToolCallId);
                     if (converted) {
                         logger.debug('[remote]: terminating tool call ' + toolCallId + ' parent: ' + parentToolCallId);
-                        session.client.sendClaudeSessionMessage(converted);
+                        messageQueue.enqueue(converted);
                     }
                 }
                 ongoingToolCalls.clear();
+
+                // Abnormal end of the turn (abort / failure): emit it last.
+                if (closeStatus) {
+                    closeTurnOrdered(closeStatus, 'launch ended');
+                }
 
                 // Flush any remaining messages in the queue
                 logger.debug('[remote]: flushing message queue');

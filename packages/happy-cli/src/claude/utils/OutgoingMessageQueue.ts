@@ -9,7 +9,8 @@ import { AsyncLock } from '@/utils/lock';
 
 interface QueueItem {
     id: number;                    // Incremental ID for ordering
-    logMessage: any;               
+    logMessage?: any;              // Message item (absent for control items)
+    run?: () => void;              // Control item: invoked in order instead of sendFunction
     delayed: boolean;              // Whether this message should be delayed
     delayMs: number;               // Delay duration (e.g., 250ms)
     toolCallIds?: string[];        // Tool calls to track for early release
@@ -58,7 +59,28 @@ export class OutgoingMessageQueue {
         // Try to process queue
         this.scheduleProcessing();
     }
-    
+
+    /**
+     * Add an ordered control action. It runs only after every item enqueued
+     * before it has been sent (including delayed tool-call messages), and
+     * before anything enqueued after it. Used for turn boundaries: a turn-end
+     * emitted here can never overtake the last message of its own turn.
+     */
+    enqueueControl(run: () => void) {
+        this.lock.inLock(async () => {
+            this.queue.push({
+                id: this.nextId++,
+                run,
+                delayed: false,
+                delayMs: 0,
+                released: true,
+                sent: false
+            });
+        });
+
+        this.scheduleProcessing();
+    }
+
     /**
      * Release specific item by ID
      */
@@ -121,7 +143,9 @@ export class OutgoingMessageQueue {
             
             // Send if not already sent
             if (!item.sent) {
-                if (item.logMessage.type !== 'system') {
+                if (item.run) {
+                    item.run();
+                } else if (item.logMessage.type !== 'system') {
                     this.sendFunction(item.logMessage);
                 }
                 item.sent = true;

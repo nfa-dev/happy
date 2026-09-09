@@ -577,3 +577,11 @@ describe('closeClaudeTurnWithStatus', () => {
         expect(result.envelopes[1].ev).toEqual({ t: 'turn-end', status: 'cancelled' });
     });
 });
+
+describe('closeClaudeTurnWithStatus without an open turn', () => {
+    it('is a no-op so callers may close defensively', () => {
+        const result = closeClaudeTurnWithStatus({ currentTurnId: null }, 'completed');
+        expect(result.currentTurnId).toBeNull();
+        expect(result.envelopes).toHaveLength(0);
+    });
+});

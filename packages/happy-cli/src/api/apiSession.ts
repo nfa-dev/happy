@@ -782,10 +782,15 @@ export class ApiSessionClient extends EventEmitter {
         this.applyClaudeSessionMessageSideEffects(body);
     }
 
-    closeClaudeSessionTurn(status: SessionTurnEndStatus = 'completed') {
+    /**
+     * Close the current Claude turn. No-op (returns false) when no turn is
+     * open, so callers may invoke it defensively.
+     */
+    closeClaudeSessionTurn(status: SessionTurnEndStatus = 'completed'): boolean {
         const mapped = closeClaudeTurnWithStatus(this.claudeSessionProtocolState, status);
         this.claudeSessionProtocolState.currentTurnId = mapped.currentTurnId;
         this.enqueueSessionProtocolEnvelopes(mapped.envelopes);
+        return mapped.envelopes.length > 0;
     }
 
     sendCodexMessage(body: any) {
