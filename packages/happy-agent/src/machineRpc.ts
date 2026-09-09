@@ -65,6 +65,11 @@ export async function spawnSessionOnMachine(
         approvedNewDirectoryCreation?: boolean;
         agent?: SupportedAgent;
         providerToken?: string;
+        // daemon 의 spawn-happy-session 이 받는 스폰 모드 (happy-cli apiMachine.ts) — 생략 시 daemon 기본값
+        // (permission 은 'default' = 도구마다 승인 요청). 헤드리스 e2e 는 'yolo' 를 넘겨야 한다.
+        permissionMode?: string;
+        modelMode?: string;
+        effortLevel?: string;
     },
 ): Promise<SpawnMachineSessionResult> {
     const socket = io(config.serverUrl, {
@@ -89,6 +94,9 @@ export async function spawnSessionOnMachine(
                 approvedNewDirectoryCreation: options.approvedNewDirectoryCreation ?? false,
                 token: options.providerToken,
                 agent: options.agent,
+                permissionMode: options.permissionMode,
+                modelMode: options.modelMode,
+                effortLevel: options.effortLevel,
             }),
         );
 
@@ -130,6 +138,36 @@ export async function spawnSessionOnMachine(
         }
 
         return decrypted as SpawnMachineSessionResult;
+    } finally {
+        socket.close();
+    }
+}
+
+// daemon 의 stop-session RPC — 세션 프로세스 종료 (승인 대기 등으로 멈춘 헤드리스 세션 정리용).
+export async function stopSessionOnMachine(
+    config: Config,
+    machine: DecryptedMachine,
+    token: string,
+    sessionId: string,
+): Promise<unknown> {
+    const socket = io(config.serverUrl, {
+        auth: { token },
+        path: '/v1/updates',
+        transports: ['websocket'],
+        autoConnect: false,
+        reconnection: false,
+    });
+    socket.connect();
+    try {
+        await waitForConnect(socket);
+        const params = encodeBase64(encrypt(machine.encryption.key, machine.encryption.variant, { sessionId }));
+        const response = await socket.timeout(30_000).emitWithAck('rpc-call', {
+            method: `${machine.id}:stop-session`,
+            params,
+        }) as RpcAck;
+        if (!response.ok) throw new Error(normalizeRpcError(response.error, machine.id));
+        if (!response.result) return null;
+        return decrypt(machine.encryption.key, machine.encryption.variant, decodeBase64(response.result));
     } finally {
         socket.close();
     }

@@ -1,13 +1,16 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
+import { readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { loadConfig } from './config';
 import type { Config } from './config';
 import { requireCredentials } from './credentials';
 import type { Credentials } from './credentials';
-import { authLogin, authLogout, authStatus } from './auth';
+import { authLogin, authLogout, authRestore, authStatus } from './auth';
+import { parseSecretKey } from './secretKey';
+import { promptSecret } from './promptSecret';
 import { listSessions, listActiveSessions, createSession, getSessionMessages, listMachines } from './api';
 import type { DecryptedMachine, DecryptedSession } from './api';
 import { resumeSessionOnMachine, spawnSessionOnMachine, type SupportedAgent } from './machineRpc';
@@ -129,6 +132,26 @@ program
             const config = loadConfig();
             await authLogin(config);
         })
+    )
+    .addCommand(
+        new Command('restore')
+            .description('Authenticate with an account secret key (no QR pairing)')
+            .option('--secret-file <path>', 'Read the secret key from a file instead of prompting')
+            .action(async (opts: { secretFile?: string }) => {
+                const config = loadConfig();
+
+                let rawSecret: string;
+                if (opts.secretFile) {
+                    rawSecret = readFileSync(opts.secretFile, 'utf-8');
+                } else if (process.env.HAPPY_SECRET_KEY) {
+                    rawSecret = process.env.HAPPY_SECRET_KEY;
+                } else {
+                    rawSecret = await promptSecret('Secret key (input hidden): ');
+                }
+
+                const secret = parseSecretKey(rawSecret);
+                await authRestore(config, secret);
+            })
     )
     .addCommand(
         new Command('logout').description('Clear stored credentials').action(async () => {

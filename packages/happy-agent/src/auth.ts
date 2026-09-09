@@ -87,6 +87,41 @@ export async function authLogin(config: Config): Promise<void> {
     throw new Error('Authentication timed out. Please try again.');
 }
 
+export async function authRestore(config: Config, secret: Uint8Array): Promise<void> {
+    // Prove account ownership by signing a random challenge with the
+    // Ed25519 keypair derived from the account secret — same flow as the
+    // app's restore screen (authChallenge + POST /v1/auth).
+    const keypair = tweetnacl.sign.keyPair.fromSeed(secret);
+    const challenge = getRandomBytes(32);
+    const signature = tweetnacl.sign.detached(challenge, keypair.secretKey);
+
+    let token: string;
+    try {
+        const resp = await axios.post(`${config.serverUrl}/v1/auth`, {
+            challenge: encodeBase64(challenge),
+            signature: encodeBase64(signature),
+            publicKey: encodeBase64(keypair.publicKey),
+        }, {
+            headers: { 'X-Happy-Client': 'cli-control-plane/0.1.0' },
+        });
+        token = (resp.data as { token?: string }).token ?? '';
+    } catch (err) {
+        if (err instanceof AxiosError) {
+            throw new Error(`Failed to authenticate with secret key: ${err.message}`);
+        }
+        throw err;
+    }
+
+    if (!token) {
+        throw new Error('Server did not return a token for the secret key');
+    }
+
+    writeCredentials(config, token, secret);
+
+    console.log('## Authentication');
+    console.log('- Status: Authenticated (restored from secret key)');
+}
+
 export async function authLogout(config: Config): Promise<void> {
     clearCredentials(config);
     console.log('## Authentication');

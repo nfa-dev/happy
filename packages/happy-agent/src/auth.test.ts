@@ -41,7 +41,7 @@ vi.mock('chalk', () => ({
 }));
 
 import axios from 'axios';
-import { authLogin, authLogout, authStatus } from './auth';
+import { authLogin, authLogout, authRestore, authStatus } from './auth';
 
 const mockedAxiosPost = vi.mocked(axios.post);
 
@@ -253,6 +253,42 @@ describe('auth', () => {
             });
 
             await authLogin(config);
+        });
+    });
+
+    describe('authRestore', () => {
+        it('authenticates with a signed challenge and saves credentials', async () => {
+            const accountSecret = getRandomBytes(32);
+            const keypair = tweetnacl.sign.keyPair.fromSeed(accountSecret);
+
+            mockedAxiosPost.mockImplementation(async (url: string, data?: unknown) => {
+                expect(url).toBe('https://test-server.example.com/v1/auth');
+                const body = data as { challenge: string; signature: string; publicKey: string };
+
+                // Server-side verification: signature must be valid for the challenge
+                expect(body.publicKey).toBe(encodeBase64(keypair.publicKey));
+                const valid = tweetnacl.sign.detached.verify(
+                    new Uint8Array(Buffer.from(body.challenge, 'base64')),
+                    new Uint8Array(Buffer.from(body.signature, 'base64')),
+                    keypair.publicKey,
+                );
+                expect(valid).toBe(true);
+
+                return { data: { token: 'restored-jwt-token' } };
+            });
+
+            await authRestore(config, accountSecret);
+
+            const creds = readCredentials(config);
+            expect(creds).not.toBeNull();
+            expect(creds!.token).toBe('restored-jwt-token');
+            expect(creds!.secret).toEqual(accountSecret);
+        });
+
+        it('throws when the server does not return a token', async () => {
+            mockedAxiosPost.mockResolvedValue({ data: {} });
+            await expect(authRestore(config, getRandomBytes(32))).rejects.toThrow('did not return a token');
+            expect(existsSync(config.credentialPath)).toBe(false);
         });
     });
 

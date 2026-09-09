@@ -1,6 +1,6 @@
 {
   "name": "happy-agent",
-  "version": "0.1.0",
+  "version": "0.1.0-navercorp",
   "description": "CLI client for controlling Happy Coder agents remotely",
   "author": "Kirill Dubovitskiy",
   "license": "MIT",
@@ -24,6 +24,16 @@
         "types": "./dist/index.d.mts",
         "default": "./dist/index.mjs"
       }
+    },
+    "./lib": {
+      "require": {
+        "types": "./dist/lib.d.cts",
+        "default": "./dist/lib.cjs"
+      },
+      "import": {
+        "types": "./dist/lib.d.mts",
+        "default": "./dist/lib.mjs"
+      }
     }
   },
   "files": [
@@ -38,6 +48,7 @@
     "test:integration": "$npm_execpath run build && vitest run --config vitest.integration.config.ts",
     "dev": "tsx src/index.ts",
     "prepublishOnly": "$npm_execpath run build && $npm_execpath test",
+    "publish:nexus": "node scripts/publish-nexus.mjs",
     "release": "npx --no-install release-it"
   },
   "dependencies": {
