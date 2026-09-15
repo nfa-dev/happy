@@ -181,7 +181,10 @@ jobs:
               builtAt: new Date().toISOString(),
               basePath: process.env.BASE_PATH,
               serverUrl: process.env.SERVER_URL || "(기본값: api.cluster-fluster.com)",
-              localPatches: ["slopus/happy#1767 (commit)"].concat(
+              localPatches: [
+                "slopus/happy#1767 (commit)",
+                "slopus/happy#1518 (commit, ported)",
+              ].concat(
                 process.env.PATCH_APPLIED === "true" ? ["Shopify/flash-list#2468 (dist port)"] : []
               ),
             }, null, 2) + "\n");
