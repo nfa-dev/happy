@@ -6,20 +6,26 @@
 
 ## 왜
 
-웹(데스크톱 브라우저)에서만 채팅 히스토리를 사실상 볼 수 없었다. 네이티브 앱은 둘 다 멀쩡하다.
+웹(데스크톱 브라우저)에서만 채팅 히스토리를 사실상 볼 수 없었다. 네이티브 앱은 셋 다 멀쩡하다.
 
 | 증상 | 원인 | upstream |
 |---|---|---|
 | 휠 방향이 반대 — 위로 굴리면 최신 쪽으로 간다 | `inverted` 가 콘텐츠 래퍼와 셀에만 `scaleY(-1)` 을 걸고 스크롤 노드에는 안 걸어서, 브라우저 기본 휠이 뒤집힌 축으로 `scrollTop` 을 움직인다 | [slopus/happy#1768](https://github.com/slopus/happy/issues/1768), 수정 PR [#1767](https://github.com/slopus/happy/pull/1767) 미머지 |
 | 위로 올리면 일정 지점부터 빈 화면 | FlashList 가 `firstItemOffset` 을 `getBoundingClientRect()` 로 재는데 이 값은 transform 을 반영한다. 뒤집힌 컨테이너 안에서 스크롤할수록 값이 커져(정지 8 → 735, 1200 스크롤 뒤 3135) 내부 오프셋이 음수로 떨어지고 가상화 창이 멎는다 | [Shopify/flash-list#2380](https://github.com/Shopify/flash-list/issues/2380), 수정 PR [#2468](https://github.com/Shopify/flash-list/pull/2468) 미머지 |
+| PgUp/PgDn·방향키·스페이스도 반대 | 휠과 같은 원인. 브라우저가 변환되지 않은 스크롤 노드를 움직인다 | [slopus/happy#1416](https://github.com/slopus/happy/issues/1416), 드래프트 PR [#1518](https://github.com/slopus/happy/pull/1518) 미머지 |
 
 ## 구성
 
-이 브랜치는 upstream `main` 위에 **커밋 두 개**뿐이다. rebase 를 쉽게 두려고 일부러 작게 유지한다.
+이 브랜치는 upstream `main` 위에 커밋 몇 개뿐이다. rebase 를 쉽게 두려고 일부러 작게 유지한다.
 
 1. `fix(app): correct inverted chat scroll wheel direction on web` — PR #1767 을 `git am` 으로 얹은
    것(원저자 Federico Liva 표기 유지).
-2. 이 디렉토리와 `.github/workflows/pages.yml`.
+2. `fix(app): correct inverted chat keyboard scroll direction on web` — 드래프트 PR #1518 의 포팅.
+   키 매핑과 테스트는 그 PR 그대로, 배선만 지금 리스트에 맞췄다(#1518 은 FlatList 시절 ChatList 를
+   전제로 쓰여서 ref 이름과 effect 의존성이 다르다). 키 입력에서도 `userTookOverRef` 를 세우는 것
+   하나를 더했다 — 지금 리스트는 히스토리 페이징을 그 플래그로 막아둬서, 안 세우면 키보드만 쓰는
+   사람은 첫 페이지 끝에서 대화가 끊긴다.
+3. 이 디렉토리와 `.github/workflows/pages.yml`.
 
 FlashList 수정은 `node_modules` 를 고치는 것이라 소스 커밋이 안 된다. 그래서
 `patches/0002-flash-list-web-inverted-measurement.patch` 로 두고 워크플로가 `pnpm install`
@@ -56,5 +62,21 @@ JS 만 실려 있다. pnpm isolated 레이아웃이라 실경로는 심링크를
   붙으면 빌드가 죽으니 조용히 어긋날 일은 없다.
 - **무엇이 떠 있는지**: <https://nfa-dev.github.io/happy/build-info.json> 에 커밋 SHA, 빌드 시각,
   적용된 로컬 패치 목록이 있다.
-- **제거 조건**: #1767 이 머지되면 rebase 할 때 커밋이 자연히 사라진다. flash-list 가 고쳐 릴리스하고
-  upstream 이 그 버전으로 올리면 패치 단계가 "이미 반영됨"을 찍는다 — 그때 `patches/` 에서 지운다.
+- **제거 조건**: #1767·#1518 이 머지되면 rebase 할 때 커밋이 자연히 사라진다. flash-list 가 고쳐
+  릴리스하고 upstream 이 그 버전으로 올리면 패치 단계가 "이미 반영됨"을 찍는다 — 그때 `patches/`
+  에서 지운다.
+
+## 아직 남은 것
+
+- **Shift+Space(위로 한 화면)와 Home/End** 는 여전히 반대다. #1518 이 수정키가 눌린 이벤트를
+  통째로 넘기기 때문인데, upstream 이 머지할 형상을 따르려고 매핑은 건드리지 않았다.
+- **Ctrl+휠·트랙패드 핀치 확대/축소** 가 채팅 위에서 막힌다. #1767 의 세로 휠 분기가 `ctrlKey` 를
+  배제하지 않아서다. 이것도 upstream PR 아티팩트 그대로 쓴 결과다.
+
+## 빌드 파이프라인이 막아주는 것
+
+워크플로는 배포 전에 세 가지를 확인한다. 패치는 `--fuzz=0` + 적용 후 마커 재확인, 번들되는 소스
+전체 `tsc --noEmit`, 그리고 키 매핑 유닛 테스트. Metro 는 타입을 확인하지 않고 지우기만 하고
+upstream 의 typecheck 워크플로는 main 대상 PR 에서만 돌기 때문에, rebase 로 무언가 어긋나면
+여기서 걸린다. typecheck 범위를 소스로 좁힌 이유는 이 워크플로가 happy-app 서브그래프만
+설치해서 spec 파일이 참조하는 다른 워크스페이스의 `@types/*` 가 없기 때문이다.
