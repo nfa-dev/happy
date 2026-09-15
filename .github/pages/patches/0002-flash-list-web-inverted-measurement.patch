@@ -1,0 +1,58 @@
+diff -ruN a/dist/recyclerview/utils/measureLayout.web.js b/dist/recyclerview/utils/measureLayout.web.js
+--- a/dist/recyclerview/utils/measureLayout.web.js	2026-09-15 17:53:09.155480900 +0900
++++ b/dist/recyclerview/utils/measureLayout.web.js	2026-09-15 17:51:19.678979300 +0900
+@@ -16,6 +16,32 @@
+     return { scrollX, scrollY };
+ }
+ /**
++ * Gets layout-box offsets, which are unaffected by CSS transforms.
++ *
++ * Ported from Shopify/flash-list#2468 (src/recyclerview/utils/measureLayout.web.ts)
++ * to the published dist of 2.3.1. Fixes Shopify/flash-list#2380: with `inverted`
++ * on react-native-web the outer container is flipped with scaleY(-1), and
++ * getBoundingClientRect() is transform-aware, so firstItemOffset grew with the
++ * scroll offset and the virtualization window froze (blank list, onEndReached
++ * never fired).
++ */
++function getLayoutOffsets(element, stopAt) {
++    let x = 0;
++    let y = 0;
++    let currentElement = element;
++    while (currentElement && currentElement !== stopAt) {
++        const htmlElement = currentElement;
++        if (typeof htmlElement.offsetLeft !== "number" ||
++            typeof htmlElement.offsetTop !== "number") {
++            return undefined;
++        }
++        x += htmlElement.offsetLeft;
++        y += htmlElement.offsetTop;
++        currentElement = htmlElement.offsetParent;
++    }
++    return currentElement === stopAt ? { x, y } : undefined;
++}
++/**
+  * Checks if two dimension values are not equal, with a small tolerance.
+  */
+ export function areDimensionsNotEqual(value1, value2) {
+@@ -44,6 +70,14 @@
+  */
+ export function measureFirstChildLayout(childContainerView, parentView) {
+     const childRect = childContainerView.getBoundingClientRect();
++    const layoutOffsets = getLayoutOffsets(childContainerView, parentView);
++    if (layoutOffsets) {
++        return {
++            ...layoutOffsets,
++            width: roundOffPixel(childRect.width),
++            height: roundOffPixel(childRect.height),
++        };
++    }
+     const parentRect = parentView.getBoundingClientRect();
+     // Get scroll offsets for child container (max 3 parents)
+     const scrollOffsets = getScrollOffsets(childContainerView, parentView);
+@@ -74,4 +108,4 @@
+     }
+     return layout;
+ }
+-//# sourceMappingURL=measureLayout.web.js.map
+\ No newline at end of file
++//# sourceMappingURL=measureLayout.web.js.map
