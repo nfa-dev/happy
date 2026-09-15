@@ -29,6 +29,9 @@ concurrency:
 env:
   # 프로젝트 페이지는 /<repo> 아래서 서빙되므로 자산 경로에 이 prefix 가 베이크돼야 한다.
   BASE_PATH: /happy
+  # app.config.js 의 variant. 없으면 development 로 잡혀 탭 제목이 "Happy (dev)" 가 되고
+  # 콘솔 로깅이 기본 on 이다. 웹 export 에서 갈리는 건 이 둘뿐(나머지는 네이티브 전용).
+  APP_ENV: production
   CI: '1'
   EXPO_NO_TELEMETRY: '1'
   COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
