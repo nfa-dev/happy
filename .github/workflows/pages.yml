@@ -99,6 +99,17 @@ jobs:
             echo "applied=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Metro 는 타입을 확인하지 않고 지워버리기만 한다. 이 브랜치는 소스에 수정을 얹고
+      # upstream 위로 rebase 하며 사는 형상이라, 타입이 어긋난 채 배포되지 않게 여기서 막는다.
+      # (upstream 의 typecheck 워크플로는 main 대상 PR 에서만 돈다)
+      - name: Typecheck (happy-app)
+        run: pnpm --filter "{packages/happy-app}" typecheck
+
+      - name: Unit tests (chat list keyboard scroll)
+        run: |
+          pnpm --filter "{packages/happy-app}" exec vitest run \
+            sources/components/chatListKeyboardScroll.test.ts
+
       # Expo 는 experiments.baseUrl 을 빌드 타임에 베이크한다. 여기서 주입하면 브랜치 diff 가
       # 커밋 하나로 유지돼 upstream rebase 가 쉽다. 이미 있으면 사람이 봐야 하므로 fail-fast.
       - name: Inject experiments.baseUrl

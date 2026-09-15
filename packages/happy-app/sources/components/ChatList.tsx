@@ -19,6 +19,7 @@ import { usesControlledSessionUi } from '@/sync/rig';
 import { buildAgentTurnCopyTextByMessageId } from '@/utils/agentTurnCopy';
 import { perfSince, useCommitPerf } from '@/utils/perfLog';
 import { DiffSyntaxCell, SyntaxViewport, SYNTAX_VIEWABILITY } from './diff/syntax/viewport';
+import { getInvertedChatListKeyboardScrollDelta } from './chatListKeyboardScroll';
 
 const SCROLL_THRESHOLD = 300;
 const DOCK_DETAILS_SHOW_OFFSET = 16;
@@ -770,6 +771,34 @@ const ChatListInternal = React.memo((props: {
         return () => node.removeEventListener('wheel', handler);
     }, [handoffListRevision]);
 
+    // The keyboard is wrong on web for the same reason the wheel was: the
+    // browser scrolls the untransformed scroll node, so PgUp/PgDn, the arrows
+    // and Space all move the conversation backwards. Take the reading keys over
+    // and drive scrollTop by the negated delta. Ported from slopus/happy#1518,
+    // which was written against the FlatList-era list; the mapping is that PR's,
+    // the wiring is this list's.
+    //
+    // Unlike a wheel, a key is also the only signal that a keyboard-only reader
+    // took over — without setting it here, history paging (gated on
+    // userTookOverRef) would never fire for them and the conversation would end
+    // at the first rendered page.
+    React.useEffect(() => {
+        if (Platform.OS !== 'web') return;
+        if (typeof window === 'undefined' || typeof document === 'undefined') return;
+        const node = listRef.current?.getScrollableNode?.() as HTMLElement | undefined;
+        if (!node) return;
+        const handler = (e: KeyboardEvent) => {
+            if (!shouldHandleChatListKeyboardEvent(node, e.target)) return;
+            const delta = getInvertedChatListKeyboardScrollDelta(e, node.clientHeight);
+            if (delta === null) return;
+            userTookOverRef.current = true;
+            node.scrollTop += delta;
+            e.preventDefault();
+        };
+        window.addEventListener('keydown', handler, true);
+        return () => window.removeEventListener('keydown', handler, true);
+    }, [handoffListRevision]);
+
     return (
         <View style={{ flex: 1 }}>
             <FlashList
@@ -835,6 +864,18 @@ const ChatListInternal = React.memo((props: {
         </View>
     )
 });
+
+/**
+ * Whether a keydown anywhere on the page is the reader navigating the
+ * conversation, rather than someone typing. The composer is a textarea, so
+ * without this the arrows and Space would scroll the list out from under a
+ * message being written — and preventDefault would eat the keystroke.
+ */
+function shouldHandleChatListKeyboardEvent(node: HTMLElement, target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return true;
+    if (target.isContentEditable || target.closest('input, textarea, select')) return false;
+    return target === document.body || target === document.documentElement || node.contains(target);
+}
 
 const styles = StyleSheet.create((theme) => ({
     scrollButtonContainer: {
