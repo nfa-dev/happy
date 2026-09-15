@@ -102,8 +102,29 @@ jobs:
       # Metro 는 타입을 확인하지 않고 지워버리기만 한다. 이 브랜치는 소스에 수정을 얹고
       # upstream 위로 rebase 하며 사는 형상이라, 타입이 어긋난 채 배포되지 않게 여기서 막는다.
       # (upstream 의 typecheck 워크플로는 main 대상 PR 에서만 돈다)
-      - name: Typecheck (happy-app)
-        run: pnpm --filter "{packages/happy-app}" typecheck
+      #
+      # 범위는 실제로 번들되는 소스로 좁힌다. 여기서는 happy-app 서브그래프만 설치하므로
+      # 다른 워크스페이스가 끌고 오는 @types/* 가 없고, spec 파일이 그걸 참조해 실패한다
+      # (예: diff/syntax/factory.spec.ts → @types/babel__core). upstream 워크플로는 전체
+      # 설치라 안 겪는 문제다. 테스트 파일은 바로 다음 스텝에서 vitest 로 실제 실행한다.
+      - name: Typecheck (happy-app sources)
+        run: |
+          set -eux
+          cat > packages/happy-app/tsconfig.pages.json <<'JSON'
+          {
+            "extends": "./tsconfig.json",
+            "exclude": [
+              "sources/trash/**/*",
+              "node_modules",
+              "**/*.spec.ts",
+              "**/*.spec.tsx",
+              "**/*.test.ts",
+              "**/*.test.tsx"
+            ]
+          }
+          JSON
+          pnpm --filter "{packages/happy-app}" exec tsc --noEmit -p tsconfig.pages.json
+          rm packages/happy-app/tsconfig.pages.json
 
       - name: Unit tests (chat list keyboard scroll)
         run: |
