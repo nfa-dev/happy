@@ -774,7 +774,13 @@ const ChatListInternal = React.memo((props: {
         };
         node.addEventListener('wheel', handler, { passive: false });
         return () => node.removeEventListener('wheel', handler);
-    }, [handoffListRevision]);
+        // props.active and props.sessionId are here because the node this
+        // listener is bound to does not survive either: the list remounts on its
+        // own key when the session changes, and a screen pushed on top leaves
+        // this one mounted with a ref that is briefly empty. Without them the
+        // listener stays bound to a detached node and the browser takes the
+        // wheel back — inverted again.
+    }, [handoffListRevision, props.active, props.sessionId]);
 
     // The keyboard is wrong on web for the same reason the wheel was: the
     // browser scrolls the untransformed scroll node, so PgUp/PgDn, the arrows
@@ -790,9 +796,18 @@ const ChatListInternal = React.memo((props: {
     React.useEffect(() => {
         if (Platform.OS !== 'web') return;
         if (typeof window === 'undefined' || typeof document === 'undefined') return;
-        const node = listRef.current?.getScrollableNode?.() as HTMLElement | undefined;
-        if (!node) return;
+        // Only the screen being read may take the keys. Sessions are pushed, so
+        // the previous one stays mounted with this listener still on `window`:
+        // without this gate it answers first, preventDefault()s, and scrolls a
+        // list nobody can see — the keys look dead.
+        if (!props.active) return;
         const handler = (e: KeyboardEvent) => {
+            // Resolved per event, not once: the list remounts on its own key
+            // when the session changes, and the ref can still be empty when this
+            // effect runs. A node captured above would be detached or missing,
+            // and this handler would silently scroll nothing.
+            const node = listRef.current?.getScrollableNode?.() as HTMLElement | undefined;
+            if (!node || !node.isConnected) return;
             if (!shouldHandleChatListKeyboardEvent(node, e.target)) return;
             const delta = getInvertedChatListKeyboardScrollDelta(e, node.clientHeight);
             if (delta === null) return;
@@ -802,7 +817,7 @@ const ChatListInternal = React.memo((props: {
         };
         window.addEventListener('keydown', handler, true);
         return () => window.removeEventListener('keydown', handler, true);
-    }, [handoffListRevision]);
+    }, [handoffListRevision, props.active]);
 
     return (
         <View style={{ flex: 1 }}>
