@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+    CHAT_LIST_KEYBOARD_JUMP,
     CHAT_LIST_KEYBOARD_LINE_SCROLL,
     getInvertedChatListKeyboardScrollDelta,
 } from './chatListKeyboardScroll';
@@ -58,7 +59,35 @@ describe('inverted chat list keyboard scrolling', () => {
             keyboardEvent('ArrowDown', { shiftKey: true }),
             VIEWPORT_HEIGHT,
         )).toBeNull();
-        expect(getInvertedChatListKeyboardScrollDelta(keyboardEvent('Home'), VIEWPORT_HEIGHT))
+        expect(getInvertedChatListKeyboardScrollDelta(keyboardEvent('Tab'), VIEWPORT_HEIGHT))
             .toBeNull();
+        expect(getInvertedChatListKeyboardScrollDelta(keyboardEvent('a'), VIEWPORT_HEIGHT))
+            .toBeNull();
+    });
+
+    it('pages back on Shift+Space, the one key where Shift is ours', () => {
+        expect(getInvertedChatListKeyboardScrollDelta(
+            keyboardEvent(' ', { shiftKey: true }),
+            VIEWPORT_HEIGHT,
+        )).toBe(VIEWPORT_HEIGHT);
+        expect(getInvertedChatListKeyboardScrollDelta(
+            keyboardEvent('Spacebar', { shiftKey: true }),
+            VIEWPORT_HEIGHT,
+        )).toBe(VIEWPORT_HEIGHT);
+        // ...and still pages forward without it.
+        expect(getInvertedChatListKeyboardScrollDelta(keyboardEvent(' '), VIEWPORT_HEIGHT))
+            .toBe(-VIEWPORT_HEIGHT);
+    });
+
+    // The list is inverted: the DOM's far end is the oldest message, so Home has
+    // to drive scrollTop up and End down. The deltas are clamped by the scrollTop
+    // setter, which is why they only need to be large and finite.
+    it('sends Home to the oldest message and End to the newest', () => {
+        expect(getInvertedChatListKeyboardScrollDelta(keyboardEvent('Home'), VIEWPORT_HEIGHT))
+            .toBe(CHAT_LIST_KEYBOARD_JUMP);
+        expect(getInvertedChatListKeyboardScrollDelta(keyboardEvent('End'), VIEWPORT_HEIGHT))
+            .toBe(-CHAT_LIST_KEYBOARD_JUMP);
+        expect(Number.isFinite(CHAT_LIST_KEYBOARD_JUMP)).toBe(true);
+        expect(CHAT_LIST_KEYBOARD_JUMP).toBeGreaterThan(VIEWPORT_HEIGHT);
     });
 });
