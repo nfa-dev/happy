@@ -762,7 +762,12 @@ const ChatListInternal = React.memo((props: {
             // tables) are left to the browser.
             // ponytail: if FlashList ever compensates the wheel itself this
             // double-inverts — delete this branch then.
-            if (Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
+            //
+            // A ctrlKey wheel is a zoom, not a scroll: that is how a trackpad
+            // pinch reaches the page, and how Ctrl+wheel zoom is spelled. Taking
+            // it over would scroll the list and preventDefault would cancel the
+            // browser's zoom, so it stays with the browser.
+            if (!e.ctrlKey && Math.abs(e.deltaY) >= Math.abs(e.deltaX)) {
                 node.scrollTop -= e.deltaY;
                 e.preventDefault();
             }
