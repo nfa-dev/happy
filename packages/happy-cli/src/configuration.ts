@@ -10,6 +10,10 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import packageJson from '../package.json'
 
+/** Used when neither HAPPY_*_URL nor settings.json names a server */
+export const DEFAULT_SERVER_URL = 'https://api.cluster-fluster.com'
+export const DEFAULT_WEBAPP_URL = 'https://app.happy.engineering'
+
 class Configuration {
   public readonly serverUrl: string
   public readonly webappUrl: string
@@ -57,11 +61,11 @@ class Configuration {
     this.serverUrl =
       process.env.HAPPY_SERVER_URL ||
       readSettingsStringSync(this.settingsFile, 'serverUrl') ||
-      'https://api.cluster-fluster.com'
+      DEFAULT_SERVER_URL
     this.webappUrl =
       process.env.HAPPY_WEBAPP_URL ||
       readSettingsStringSync(this.settingsFile, 'webappUrl') ||
-      'https://app.happy.engineering'
+      DEFAULT_WEBAPP_URL
 
     this.isExperimentalEnabled = ['true', '1', 'yes'].includes(process.env.HAPPY_EXPERIMENTAL?.toLowerCase() || '');
     this.disableCaffeinate = ['true', '1', 'yes'].includes(process.env.HAPPY_DISABLE_CAFFEINATE?.toLowerCase() || '');
@@ -93,7 +97,8 @@ class Configuration {
 function readSettingsStringSync(settingsFile: string, key: 'serverUrl' | 'webappUrl'): string | undefined {
   try {
     if (!existsSync(settingsFile)) return undefined
-    const raw = JSON.parse(readFileSync(settingsFile, 'utf8'))
+    // A UTF-8 BOM (PowerShell 5.1 Set-Content, older Notepad) would fail JSON.parse and silently drop the setting
+    const raw = JSON.parse(readFileSync(settingsFile, 'utf8').replace(/^\uFEFF/, ''))
     const value = raw?.[key]
     return typeof value === 'string' && value.length > 0 ? value : undefined
   } catch {

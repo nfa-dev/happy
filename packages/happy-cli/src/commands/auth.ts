@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { readCredentials, clearCredentials, clearMachineId, readSettings } from '@/persistence';
 import { authAndSetupMachineIfNeeded } from '@/ui/auth';
 import { configuration } from '@/configuration';
+import { describeServiceUrls, effectiveServiceUrls, handleAuthServer } from './authServer';
 import { handleDesktopAuth } from './desktopAuth';
 import { createInterface } from 'node:readline';
 import { stopDaemon, checkIfDaemonRunningAndCleanupStaleState } from '@/daemon/controlClient';
@@ -29,6 +30,9 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
     case 'status':
       await handleAuthStatus();
       break;
+    case 'server':
+      await handleAuthServer(args.slice(1));
+      break;
     default:
       console.error(chalk.red(`Unknown auth subcommand: ${subcommand}`));
       showAuthHelp();
@@ -44,6 +48,7 @@ ${chalk.bold('Usage:')}
   happy auth login [--force]    Authenticate with Happy
   happy auth logout             Remove authentication and machine data
   happy auth status             Show authentication status
+  happy auth server             Choose the Happy server URL (saved in settings.json)
   happy auth help               Show this help message
 
 ${chalk.bold('Options:')}
@@ -94,6 +99,7 @@ async function handleAuthLogin(args: string[]): Promise<void> {
 
     if (existingCreds && settings?.machineId) {
       console.log(chalk.green('✓ Already authenticated'));
+      console.log(chalk.gray(`  Server: ${configuration.serverUrl}`));
       console.log(chalk.gray(`  Machine ID: ${settings.machineId}`));
       console.log(chalk.gray(`  Host: ${os.hostname()}`));
       console.log(chalk.gray(`  Use 'happy auth login --force' to re-authenticate`));
@@ -110,6 +116,7 @@ async function handleAuthLogin(args: string[]): Promise<void> {
   try {
     const result = await authAndSetupMachineIfNeeded();
     console.log(chalk.green('\n✓ Authentication successful'));
+    console.log(chalk.gray(`  Server: ${configuration.serverUrl}`));
     console.log(chalk.gray(`  Machine ID: ${result.machineId}`));
   } catch (error) {
     console.error(chalk.red('Authentication failed:'), error instanceof Error ? error.message : 'Unknown error');
@@ -151,6 +158,8 @@ async function handleAuthLogout(): Promise<void> {
 
       // The home is shared with Happy Agent. Logout owns only CLI authentication,
       // never the Agent runtime/database or the local history used for resume.
+      // Nothing else in the home is touched, so the server choice in
+      // settings.json and the Claude accounts survive on their own.
       await clearCredentials();
       await clearMachineId();
 
@@ -169,6 +178,10 @@ async function handleAuthStatus(): Promise<void> {
   const settings = await readSettings();
 
   console.log(chalk.bold('\nAuthentication Status\n'));
+  for (const line of describeServiceUrls(effectiveServiceUrls(settings))) {
+    console.log(`  ${line}`);
+  }
+  console.log('');
 
   if (!credentials) {
     console.log(chalk.red('✗ Not authenticated'));

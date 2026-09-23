@@ -94,7 +94,9 @@ export async function readSettings(): Promise<Settings> {
   try {
     // Read raw settings
     const content = await readFile(configuration.settingsFile, 'utf8')
-    const raw = JSON.parse(content)
+    // Strip a UTF-8 BOM (Windows editors add one): JSON.parse would fail, and the
+    // defaults returned below would then overwrite the file on the next update
+    const raw = JSON.parse(content.replace(/^\uFEFF/, ''))
 
     // Check schema version (default to 1 if missing)
     const schemaVersion = raw.schemaVersion ?? 1;
