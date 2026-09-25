@@ -20,6 +20,7 @@ import { getToolName } from "./utils/getToolName";
 import { getAskUserQuestionToolCallIds } from "./utils/questionNotification";
 import { launchFailureMessage } from "./utils/launchFailureMessage";
 import { cleanupStdinAfterInk } from "@/utils/terminalStdinCleanup";
+import { parseSpecialCommand } from "@/parsers/specialCommands";
 import type { MessageParam, ContentBlockParam } from '@anthropic-ai/sdk/resources';
 import type { SessionTurnEndStatus } from '@slopus/happy-wire';
 
@@ -116,6 +117,27 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
         },
     });
 
+    // Session cron restore (sessionCronRestore.ts): every query restart this
+    // launcher triggers kills the claude process together with its pending
+    // /loop wakeups and session cron jobs. A snapshot left by a previous
+    // launcher describes a process that is long gone — start clean.
+    session.cronRestorer?.discard('remote launcher start');
+    const restoreSessionCrons = (reason: string, label: string) => {
+        const restored = session.cronRestorer?.restoreAfterRestart(reason);
+        if (!restored || restored.armed === 0) {
+            return;
+        }
+        const next = restored.nextFireAt !== null
+            ? new Date(restored.nextFireAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : null;
+        const when = restored.immediate > 0
+            ? (next ? `${restored.immediate} due now, next at ${next}` : 'due now')
+            : `next at ${next}`;
+        const message = `${label} restarts Claude, which drops its scheduled wakeups — happy re-armed ${restored.armed} (${when}).`;
+        messageBuffer.addMessage(message, 'status');
+        session.client.sendSessionEvent({ type: 'message', message });
+    };
+
     // Drop any permission requests left over in agent state from a
     // previous CLI process that died while a tool prompt was open. The
     // in-memory pendingRequests map is fresh and empty, but the server
@@ -186,6 +208,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                     if (c.type === 'tool_use') {
                         logger.debug('[remote]: detected tool use ' + c.id! + ' parent: ' + umessage.parent_tool_use_id);
                         ongoingToolCalls.set(c.id!, { parentToolCallId: umessage.parent_tool_use_id ?? null });
+                        // Full prompts of ScheduleWakeup / CronCreate (the Stop hook
+                        // clips them) and ScheduleWakeup({stop:true}) for restored loops
+                        session.cronRestorer?.noteToolUse(c.name, c.input);
                     }
                 }
             }
@@ -393,6 +418,7 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             accountSwitch.noteModel(pending.mode.model);
                         }
                         if (await accountSwitch.maybeSwitchAtTurnBoundary()) {
+                            restoreSessionCrons('account switch', 'The account switch');
                             return null;
                         }
                         // Every account exhausted: hold dispatch (instructions
@@ -414,6 +440,13 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             if ((modeHash && msg.hash !== modeHash) || msg.isolate) {
                                 logger.debug('[remote]: mode has changed, pending message');
                                 pending = msg;
+                                // The restart drops the process's scheduled wakeups:
+                                // carry them over, unless the session is being reset.
+                                if (parseSpecialCommand(msg.message).type === 'clear') {
+                                    session.cronRestorer?.discard('/clear');
+                                } else {
+                                    restoreSessionCrons('mode change', 'The mode change');
+                                }
                                 return null;
                             }
                             modeHash = msg.hash;
@@ -472,6 +505,7 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             // window that is already spent.
                             if (accountSwitch.noteModel(msg.mode.model) && await accountSwitch.maybeSwitchAtTurnBoundary()) {
                                 pending = dispatch;
+                                restoreSessionCrons('account switch', 'The account switch');
                                 return null;
                             }
 
@@ -584,6 +618,10 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                     // path. The turn is deliberately left open — the retry is its
                     // continuation, and the eventual result closes it as usual.
                     accountSwitchRestart = false;
+                    // The interrupted turn never reached its Stop hook, so the
+                    // snapshot is the previous turn's: the wakeups that were
+                    // pending when this turn started.
+                    restoreSessionCrons('rate-limit account switch', 'The rate-limit account switch');
                     if (resultReceivedSinceDispatch) {
                         // The rejected turn still delivered its result before the
                         // abort landed — the account is switched, but re-running
@@ -600,6 +638,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                     }
                 } else if (!exitReason && abortController.signal.aborted) {
                     closeStatus = 'cancelled';
+                    // The user stopped the session on purpose: its wakeups die
+                    // with the process, as they always did.
+                    session.cronRestorer?.discard('user abort');
                     session.client.sendSessionEvent({ type: 'message', message: 'Aborted by user' });
                 }
             } catch (e) {
@@ -608,6 +649,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                     // `finally` closes the turn through the outgoing queue, so
                     // this message still precedes the turn-end.
                     closeStatus = 'failed';
+                    // Re-issuing wakeups into a launch that keeps failing would
+                    // only repeat the failure.
+                    session.cronRestorer?.discard('launch failure');
                     const authMessage = claudeProviderAuthErrorMessage(e);
                     session.client.sendSessionEvent({ type: 'message', message: authMessage ?? launchFailureMessage(e) });
                     continue;
@@ -653,6 +697,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
 
         // Clean up permission handler
         permissionHandler.reset();
+
+        // Leaving remote mode: nothing here will dispatch a restored wakeup
+        session.cronRestorer?.cancelAll();
 
         // Reset Terminal
         const t0 = Date.now();

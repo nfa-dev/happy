@@ -18,6 +18,7 @@ import { initialMachineMetadata } from '@/daemon/run';
 import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { startHookServer } from '@/claude/utils/startHookServer';
 import { generateHookSettingsFile, cleanupHookSettingsFile } from '@/claude/utils/generateHookSettings';
+import { SessionCronRestorer } from '@/claude/utils/sessionCronRestore';
 import { registerKillSessionHandler } from './registerKillSessionHandler';
 import { projectPath } from '../projectPath';
 import { resolve } from 'node:path';
@@ -514,6 +515,15 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
     // Used by hook server to notify Session when Claude changes session ID
     let currentSession: Session | null = null;
 
+    // Scheduled work (/loop wakeups, session cron jobs) lives inside the
+    // claude process. The Stop hook reports it at every turn end and the
+    // restorer re-issues it after a happy-initiated query restart (account
+    // switch, mode change) — through the same queue as app messages, under
+    // the mode a new app message would get.
+    const cronRestorer = new SessionCronRestorer({
+        push: (text) => messageQueue.push(text, currentEnhancedMode()),
+    });
+
     // Start Hook server for receiving Claude session notifications
     const hookServer = await startHookServer({
         onSessionHook: (sessionId, data) => {
@@ -542,7 +552,10 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
                     currentSession.onSessionFound(sessionId);
                 }
             }
-        }
+        },
+        onStopHook: (data) => {
+            cronRestorer.noteStopHook(data);
+        },
     });
     logger.debug(`[START] Hook server started on port ${hookServer.port}`);
 
@@ -1011,8 +1024,12 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
         claudeArgs: options.claudeArgs,
         sandboxConfig,
         hookSettingsPath,
-        jsRuntime: options.jsRuntime
+        jsRuntime: options.jsRuntime,
+        cronRestorer,
     });
+
+    // Nothing left to wake: drop any restored wakeup still pending
+    cronRestorer.cancelAll();
 
     // Cleanup session resources (intervals, callbacks) - prevents memory leak
     // Note: currentSession is set by onSessionReady callback during loop()
