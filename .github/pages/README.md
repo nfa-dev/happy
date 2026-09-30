@@ -1,8 +1,9 @@
 # `pages` 브랜치 — 웹 빌드를 GitHub Pages 로
 
 [slopus/happy](https://github.com/slopus/happy) 의 `packages/happy-app` 을 Expo web 으로 export 해서
-<https://nfa-dev.github.io/happy/> 에 올린다. upstream 이 아직 머지하지 않은 **웹 스크롤 수정 두 건**을
-얹은 빌드를 쓰려는 것이 목적이고, 그 외에는 upstream 그대로다.
+<https://nfa-dev.github.io/happy/> 에 올린다. upstream 이 아직 머지하지 않은 **웹 키보드 스크롤
+수정**과 **FlashList 측정 패치**를 얹은 빌드를 쓰려는 것이 목적이고, 그 외에는 upstream 그대로다.
+휠 방향 수정은 2026-09 에 upstream 이 직접 머지해서 여기서는 빠졌다.
 
 ## 왜
 
@@ -10,22 +11,23 @@
 
 | 증상 | 원인 | upstream |
 |---|---|---|
-| 휠 방향이 반대 — 위로 굴리면 최신 쪽으로 간다 | `inverted` 가 콘텐츠 래퍼와 셀에만 `scaleY(-1)` 을 걸고 스크롤 노드에는 안 걸어서, 브라우저 기본 휠이 뒤집힌 축으로 `scrollTop` 을 움직인다 | [slopus/happy#1768](https://github.com/slopus/happy/issues/1768), 수정 PR [#1767](https://github.com/slopus/happy/pull/1767) 미머지 |
+| 휠 방향이 반대 — 위로 굴리면 최신 쪽으로 간다 | `inverted` 가 콘텐츠 래퍼와 셀에만 `scaleY(-1)` 을 걸고 스크롤 노드에는 안 걸어서, 브라우저 기본 휠이 뒤집힌 축으로 `scrollTop` 을 움직인다 | **머지됨** — upstream 이 `sources/utils/invertedChatWheel.ts` 로 직접 구현([#1767](https://github.com/slopus/happy/pull/1767) 을 따르되 deltaMode·`composedPath` 자식 양보·Shift+휠까지 더했다) |
 | 위로 올리면 일정 지점부터 빈 화면 | FlashList 가 `firstItemOffset` 을 `getBoundingClientRect()` 로 재는데 이 값은 transform 을 반영한다. 뒤집힌 컨테이너 안에서 스크롤할수록 값이 커져(정지 8 → 735, 1200 스크롤 뒤 3135) 내부 오프셋이 음수로 떨어지고 가상화 창이 멎는다 | [Shopify/flash-list#2380](https://github.com/Shopify/flash-list/issues/2380), 수정 PR [#2468](https://github.com/Shopify/flash-list/pull/2468) 미머지 |
-| PgUp/PgDn·방향키·스페이스도 반대 | 휠과 같은 원인. 브라우저가 변환되지 않은 스크롤 노드를 움직인다 | [slopus/happy#1416](https://github.com/slopus/happy/issues/1416), 드래프트 PR [#1518](https://github.com/slopus/happy/pull/1518) 미머지 |
+| PgUp/PgDn·방향키·스페이스도 반대 | 휠과 같은 원인. 브라우저가 변환되지 않은 스크롤 노드를 움직인다 | [slopus/happy#1416](https://github.com/slopus/happy/issues/1416), 드래프트 PR [#1518](https://github.com/slopus/happy/pull/1518) 미머지 — 휠을 고치면서도 키보드는 그대로 두었다 |
 
 ## 구성
 
 이 브랜치는 upstream `main` 위에 커밋 몇 개뿐이다. rebase 를 쉽게 두려고 일부러 작게 유지한다.
 
-1. `fix(app): correct inverted chat scroll wheel direction on web` — PR #1767 을 `git am` 으로 얹은
-   것(원저자 Federico Liva 표기 유지).
-2. `fix(app): correct inverted chat keyboard scroll direction on web` — 드래프트 PR #1518 의 포팅.
+1. `fix(app): correct inverted chat keyboard scroll direction on web` — 드래프트 PR #1518 의 포팅.
    키 매핑과 테스트는 그 PR 그대로, 배선만 지금 리스트에 맞췄다(#1518 은 FlatList 시절 ChatList 를
-   전제로 쓰여서 ref 이름과 effect 의존성이 다르다). 키 입력에서도 `userTookOverRef` 를 세우는 것
-   하나를 더했다 — 지금 리스트는 히스토리 페이징을 그 플래그로 막아둬서, 안 세우면 키보드만 쓰는
-   사람은 첫 페이지 끝에서 대화가 끊긴다.
-3. 이 디렉토리와 `.github/workflows/pages.yml`.
+   전제로 쓰여서 ref 이름과 effect 의존성이 다르다). 뒤이은 두 커밋이 Shift+Space·Home/End 를
+   마저 채우고, 읽고 있는 화면만 키를 가져가게 했다.
+2. `feat(app): offer Opus 5.5 and make it the Claude default` — 모델 피커에 Opus 5.5 두 행을
+   더하고 기본 모델을 거기로 옮긴다. upstream 은 Fable 5.1 까지만 올려두었다.
+3. upstream 휠 수정의 effect 의존성에 `props.active` 하나를 더한 것. upstream 은
+   `handoffListRevision` 과 `props.sessionId` 만 본다.
+4. 이 디렉토리와 `.github/workflows/pages.yml`.
 
 FlashList 수정은 `node_modules` 를 고치는 것이라 소스 커밋이 안 된다. 그래서
 `patches/0002-flash-list-web-inverted-measurement.patch` 로 두고 워크플로가 `pnpm install`
@@ -62,22 +64,24 @@ JS 만 실려 있다. pnpm isolated 레이아웃이라 실경로는 심링크를
   붙으면 빌드가 죽으니 조용히 어긋날 일은 없다.
 - **무엇이 떠 있는지**: <https://nfa-dev.github.io/happy/build-info.json> 에 커밋 SHA, 빌드 시각,
   적용된 로컬 패치 목록이 있다.
-- **제거 조건**: #1767·#1518 이 머지되면 rebase 할 때 커밋이 자연히 사라진다. flash-list 가 고쳐
-  릴리스하고 upstream 이 그 버전으로 올리면 패치 단계가 "이미 반영됨"을 찍는다 — 그때 `patches/`
-  에서 지운다.
+- **제거 조건**: #1518 이 머지되면 rebase 할 때 커밋이 자연히 사라진다(#1767 은 2026-09 에 그렇게
+  빠졌다). flash-list 가 고쳐 릴리스하고 upstream 이 그 버전으로 올리면 패치 단계가 "이미 반영됨"을
+  찍는다 — 그때 `patches/` 에서 지운다. Opus 5.5 는 upstream 이 피커에 넣는 날 사라진다.
 
 ## upstream PR 에서 더 나간 부분
 
-처음에는 두 PR 을 그대로 따랐는데, 그 상태로는 세 가지가 남아서 뒤에 따로 손봤다. upstream 이
-머지하면 이 부분만 충돌하므로 커밋을 분리해뒀다.
+#1518 을 그대로 따른 상태로는 두 가지가 남아서 뒤에 따로 손봤다. upstream 이 머지하면 이 부분만
+충돌하므로 커밋을 분리해뒀다.
 
 - **Shift+Space** 로 한 화면 위. #1518 은 수정키가 눌린 이벤트를 통째로 넘겨서 이것도 반대로
   남아 있었다. 이제 Shift 는 Space 에서만 의미를 갖고, 나머지 키에서는 선택 제스처로 보고 넘긴다.
 - **Home/End**. 목록이 뒤집혀 있어 DOM 기준 끝이 가장 오래된 메시지다. End 는 최신(offset 0),
   Home 은 가장 오래된 쪽으로 보낸다. `scrollTop` 이 대입할 때 클램프되는 성질을 쓰되 값은 반드시
   유한해야 한다 — CSSOM 이 비유한값을 0 으로 정규화해서 `Infinity` 를 쓰면 Home 이 정반대로 간다.
-- **Ctrl+휠·트랙패드 핀치 확대/축소**. #1767 의 세로 휠 분기가 `ctrlKey` 를 배제하지 않아 채팅
-  위에서 브라우저 확대/축소가 막혔다. 줌 제스처는 브라우저에 그대로 둔다.
+
+Ctrl+휠 줌 제외는 upstream 의 `handleInvertedChatWheel` 이 `event.ctrlKey` 로 처리해서 우리 커밋이
+필요 없어졌다. 히스토리 페이징을 막던 `userTookOverRef` 플래그도 upstream 이 없앴다 — 이제 가장
+오래된 렌더 메시지가 뷰포트에 가까워지면 채워지므로, 키보드 독자라고 따로 신호를 보낼 것이 없다.
 
 ## 빌드 파이프라인이 막아주는 것
 

@@ -3,7 +3,7 @@ name: Deploy web to Pages
 # happy-app 을 Expo web 으로 export 해서 GitHub Pages 에 올린다.
 # 결과: https://nfa-dev.github.io/happy/
 #
-# 이 브랜치(pages)는 upstream main 위에 웹 스크롤 수정 한 커밋과 이 워크플로만 얹은 것이다.
+# 이 브랜치(pages)는 upstream main 위에 웹 키보드 스크롤 수정, 모델 피커 한 건, 이 워크플로만 얹은 것이다.
 # 자세한 내용은 .github/pages/README.md.
 
 on:
@@ -182,7 +182,6 @@ jobs:
               basePath: process.env.BASE_PATH,
               serverUrl: process.env.SERVER_URL || "(기본값: api.cluster-fluster.com)",
               localPatches: [
-                "slopus/happy#1767 (commit)",
                 "slopus/happy#1518 (commit, ported)",
               ].concat(
                 process.env.PATCH_APPLIED === "true" ? ["Shopify/flash-list#2468 (dist port)"] : []
