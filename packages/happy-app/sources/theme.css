@@ -18,6 +18,14 @@ html.happy-app-zoomed {
 html.happy-app-zoomed body {
     width: calc(100vw / var(--happy-app-zoom));
     height: calc(100vh / var(--happy-app-zoom));
+    /* On a phone, vh is the large viewport: the height with the browser's
+       toolbars retracted. Nothing here ever scrolls the document (html and
+       body are overflow: hidden), so those toolbars never retract, and a body
+       that tall hides its own bottom — the tab bar — behind them. Landscape
+       looked fine only because browsers minimise their chrome there. dvh
+       follows the viewport actually on screen; the vh line above stays as the
+       fallback for a browser that rejects this one. */
+    height: calc(100dvh / var(--happy-app-zoom));
     transform-origin: top left;
 }
 
