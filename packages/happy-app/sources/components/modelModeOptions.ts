@@ -158,18 +158,22 @@ export function getGeminiPermissionModes(translate: Translate): PermissionMode[]
 // deliberately absent: picking a model is the point of this menu, and every
 // entry here is a 5.
 //
-// Keys are full model IDs rather than the short aliases, because the aliases
-// do not all mean what the row says. `sonnet` still resolves to Sonnet 4.6 in
-// the CLI's alias table, and `opus-5` is not in that table at all (`claude
-// --model opus-5` errors on 2.1.199). Full IDs pass straight through to the
-// API, so they say exactly which model is meant. The `[1m]` suffix is part of
-// the model ID Claude Code accepts (`claude --model 'claude-opus-5[1m]'`) and
-// selects the 1M-context variant; unknown bracket models are rejected, so the
-// suffix is honored rather than silently dropped (#1721).
+// Keys are full model IDs rather than the short aliases, because an alias is
+// a moving target: Claude Code 2.1.280 resolves `opus` to claude-opus-5-5 and
+// `fable` to claude-fable-5-1, where earlier versions of the same aliases
+// meant Opus 5 and Fable 5. A row keyed on `opus` would therefore have
+// changed model under the user on a Claude Code upgrade, saying one thing and
+// running another. Full IDs pass straight through to the API, so they say
+// exactly which model is meant. The `[1m]` suffix is part of the model ID
+// Claude Code accepts (`claude --model 'claude-opus-5[1m]'`) and selects the
+// 1M-context variant; unknown bracket models are rejected, so the suffix is
+// honored rather than silently dropped (#1721).
 export function getClaudeModelModes(): ModelMode[] {
     return [
         { key: 'claude-fable-5-1', name: 'Fable 5.1', description: '1M context', providerId: 'anthropic', providerName: 'Anthropic' },
         { key: 'claude-fable-5', name: 'Fable 5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'claude-opus-5-5', name: 'Opus 5.5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
+        { key: 'claude-opus-5-5[1m]', name: 'Opus 5.5 [1M]', description: '1M context', providerId: 'anthropic', providerName: 'Anthropic' },
         { key: 'claude-opus-5', name: 'Opus 5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
         { key: 'claude-opus-5[1m]', name: 'Opus 5 [1M]', description: '1M context', providerId: 'anthropic', providerName: 'Anthropic' },
         { key: 'claude-sonnet-5', name: 'Sonnet 5', description: null, providerId: 'anthropic', providerName: 'Anthropic' },
