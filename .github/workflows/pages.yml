@@ -74,31 +74,16 @@ jobs:
           test -d node_modules
           pnpm --filter "{packages/happy-wire}" build
 
-      # upstream 에 아직 안 들어간 수정 중 node_modules 를 고치는 것. 소스 커밋이 안 되므로
-      # 설치 뒤에 얹는다. 자세한 배경은 .github/pages/README.md.
-      #   - 이미 반영돼 있으면(마커 grep) 건너뛴다 — flash-list 가 고쳐 릴리스하면 자동 no-op.
-      #   - 그 밖의 이유로 실패하면 빌드를 죽인다. 조용히 안 붙은 채 배포되는 게 제일 위험하다.
-      #   - --fuzz=0: 기본값(fuzz 2)은 헝크 가장자리 컨텍스트가 바뀌어도 슬쩍 붙여버린다.
-      - name: Apply local patch (flash-list web inverted measurement)
-        id: patch
+      # 뒤집힌 축의 측정은 upstream 의 루트 postinstall 이 고친다
+      # (scripts/postinstall.cjs → patches/fix-flash-list-web-inversion.cjs). 서브그래프 필터
+      # 설치에서도 루트 훅은 돌지만, 조용히 빠진 채 배포되면 위로 올릴 때 빈 화면이 되므로
+      # 확인만 하고 넘어간다. 여기서 두 번째 수정을 얹으면 upstream 것이 죽은 코드가 된다.
+      - name: Verify upstream's flash-list web measurement fix
         run: |
           set -eux
-          FL_DIR="$(readlink -f packages/happy-app/node_modules/@shopify/flash-list)"
-          FL_MEASURE="${FL_DIR}/dist/recyclerview/utils/measureLayout.web.js"
-          if [ ! -f "${FL_MEASURE}" ]; then
-            echo "${FL_MEASURE} 가 없다 — flash-list 패키지 구조가 바뀌었다. .github/pages/patches 갱신 필요"
-            exit 1
-          fi
-          if grep -q 'getLayoutOffsets' "${FL_MEASURE}"; then
-            echo "flash-list#2468 이 이미 반영됨 — 로컬 패치 건너뜀 (patches/0002 삭제 가능)"
-            echo "applied=false" >> "$GITHUB_OUTPUT"
-          else
-            patch -p1 --batch --forward --fuzz=0 -d "${FL_DIR}" \
-              < .github/pages/patches/0002-flash-list-web-inverted-measurement.patch
-            grep -q 'getLayoutOffsets' "${FL_MEASURE}"
-            echo "applied=true" >> "$GITHUB_OUTPUT"
-          fi
-
+          FL_MEASURE="$(readlink -f packages/happy-app/node_modules/@shopify/flash-list)/dist/recyclerview/utils/measureLayout.web.js"
+          test -f "${FL_MEASURE}"
+          grep -q 'DOMMatrixReadOnly' "${FL_MEASURE}"
       # Metro 는 타입을 확인하지 않고 지워버리기만 한다. 이 브랜치는 소스에 수정을 얹고
       # upstream 위로 rebase 하며 사는 형상이라, 타입이 어긋난 채 배포되지 않게 여기서 막는다.
       # (upstream 의 typecheck 워크플로는 main 대상 PR 에서만 돈다)
@@ -161,7 +146,6 @@ jobs:
       - name: Pages post-processing
         env:
           SERVER_URL: ${{ inputs.server_url }}
-          PATCH_APPLIED: ${{ steps.patch.outputs.applied }}
         run: |
           set -eux
           DIST=packages/happy-app/dist
@@ -181,11 +165,7 @@ jobs:
               builtAt: new Date().toISOString(),
               basePath: process.env.BASE_PATH,
               serverUrl: process.env.SERVER_URL || "(기본값: api.cluster-fluster.com)",
-              localPatches: [
-                "slopus/happy#1518 (commit, ported)",
-              ].concat(
-                process.env.PATCH_APPLIED === "true" ? ["Shopify/flash-list#2468 (dist port)"] : []
-              ),
+              localPatches: ["slopus/happy#1518 (commit, ported)"],
             }, null, 2) + "\n");
           ' "${DIST}/build-info.json"
           cat "${DIST}/build-info.json"

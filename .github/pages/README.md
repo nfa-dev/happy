@@ -2,8 +2,8 @@
 
 [slopus/happy](https://github.com/slopus/happy) 의 `packages/happy-app` 을 Expo web 으로 export 해서
 <https://nfa-dev.github.io/happy/> 에 올린다. upstream 이 아직 머지하지 않은 **웹 키보드 스크롤
-수정**과 **FlashList 측정 패치**를 얹은 빌드를 쓰려는 것이 목적이고, 그 외에는 upstream 그대로다.
-휠 방향 수정은 2026-09 에 upstream 이 직접 머지해서 여기서는 빠졌다.
+수정**을 얹은 빌드를 쓰려는 것이 목적이고, 그 외에는 upstream 그대로다. 휠 방향과 FlashList 측정은
+2026-09 에 upstream 이 둘 다 직접 고쳐서 여기서는 빠졌다 — 이제 로컬 패치가 하나도 없다.
 
 ## 왜
 
@@ -12,7 +12,7 @@
 | 증상 | 원인 | upstream |
 |---|---|---|
 | 휠 방향이 반대 — 위로 굴리면 최신 쪽으로 간다 | `inverted` 가 콘텐츠 래퍼와 셀에만 `scaleY(-1)` 을 걸고 스크롤 노드에는 안 걸어서, 브라우저 기본 휠이 뒤집힌 축으로 `scrollTop` 을 움직인다 | **머지됨** — upstream 이 `sources/utils/invertedChatWheel.ts` 로 직접 구현([#1767](https://github.com/slopus/happy/pull/1767) 을 따르되 deltaMode·`composedPath` 자식 양보·Shift+휠까지 더했다) |
-| 위로 올리면 일정 지점부터 빈 화면 | FlashList 가 `firstItemOffset` 을 `getBoundingClientRect()` 로 재는데 이 값은 transform 을 반영한다. 뒤집힌 컨테이너 안에서 스크롤할수록 값이 커져(정지 8 → 735, 1200 스크롤 뒤 3135) 내부 오프셋이 음수로 떨어지고 가상화 창이 멎는다 | [Shopify/flash-list#2380](https://github.com/Shopify/flash-list/issues/2380), 수정 PR [#2468](https://github.com/Shopify/flash-list/pull/2468) 미머지 |
+| 위로 올리면 일정 지점부터 빈 화면 | FlashList 가 `firstItemOffset` 을 `getBoundingClientRect()` 로 재는데 이 값은 transform 을 반영한다. 뒤집힌 컨테이너 안에서 스크롤할수록 값이 커져(정지 8 → 735, 1200 스크롤 뒤 3135) 내부 오프셋이 음수로 떨어지고 가상화 창이 멎는다 | **해결됨** — flash-list 는 아직 미머지([#2380](https://github.com/Shopify/flash-list/issues/2380))지만 upstream 이 `scripts/postinstall.cjs` 에서 `node_modules` 를 고친다 |
 | PgUp/PgDn·방향키·스페이스도 반대 | 휠과 같은 원인. 브라우저가 변환되지 않은 스크롤 노드를 움직인다 | [slopus/happy#1416](https://github.com/slopus/happy/issues/1416), 드래프트 PR [#1518](https://github.com/slopus/happy/pull/1518) 미머지 — 휠을 고치면서도 키보드는 그대로 두었다 |
 
 ## 구성
@@ -29,15 +29,17 @@
    `handoffListRevision` 과 `props.sessionId` 만 본다.
 4. 이 디렉토리와 `.github/workflows/pages.yml`.
 
-FlashList 수정은 `node_modules` 를 고치는 것이라 소스 커밋이 안 된다. 그래서
-`patches/0002-flash-list-web-inverted-measurement.patch` 로 두고 워크플로가 `pnpm install`
-**뒤에** 얹는다. PR #2468 의 `getLayoutOffsets`(transform 을 타지 않는 `offsetTop` 체인으로 측정)를
-flash-list 2.3.1 의 컴파일된 dist 로 포팅한 것 — upstream PR 은 TS 소스를 고치는데 배포 패키지에는
-JS 만 실려 있다. pnpm isolated 레이아웃이라 실경로는 심링크를 `readlink -f` 로 푼다.
+FlashList 수정은 `node_modules` 를 고치는 것이라 소스 커밋이 안 된다. 한동안 이 디렉토리에
+`patches/0002-...` 로 두고 워크플로가 `pnpm install` 뒤에 얹었는데, upstream 이 같은 버그를
+`scripts/postinstall.cjs` → `patches/fix-flash-list-web-inversion.cjs` 로 직접 고치면서 치웠다.
+그쪽은 `pnpm install` 이 알아서 돌리고 자체 테스트도 있다(`patches/fix-flash-list-web-inversion.test.cjs`).
+구현이 다르다 — 우리 것은 PR #2468 의 `offsetTop` 체인이고 upstream 은 뒤집힌 축을 반대 모서리에서
+재는 방식인데, 둘을 겹치면 우리 early return 이 upstream 교정을 죽은 코드로 만든다.
 
-패치 적용은 세 갈래다. 대상 파일이 없으면 즉시 죽고, 마커(`getLayoutOffsets`)가 이미 있으면
-"이미 반영됨"을 찍고 건너뛰며, 그 외에는 `--fuzz=0` 으로 붙인 뒤 마커를 다시 확인한다. 조용히 안 붙은
-채 배포되는 것이 제일 위험해서 실패는 전부 빌드 중단으로 보낸다.
+그래서 워크플로는 붙이는 대신 **확인만** 한다. 설치 뒤 `measureLayout.web.js` 에 upstream 의 마커
+(`DOMMatrixReadOnly`)가 있는지 보고 없으면 빌드를 죽인다. 서브그래프 필터 설치(`--filter
+"{packages/happy-app}..."`)에서도 루트 postinstall 은 돌지만, 조용히 빠진 채 배포되면 위로 올릴 때
+빈 화면이 되기 때문이다.
 
 ## GitHub Pages 쪽 함정
 
@@ -65,8 +67,8 @@ JS 만 실려 있다. pnpm isolated 레이아웃이라 실경로는 심링크를
 - **무엇이 떠 있는지**: <https://nfa-dev.github.io/happy/build-info.json> 에 커밋 SHA, 빌드 시각,
   적용된 로컬 패치 목록이 있다.
 - **제거 조건**: #1518 이 머지되면 rebase 할 때 커밋이 자연히 사라진다(#1767 은 2026-09 에 그렇게
-  빠졌다). flash-list 가 고쳐 릴리스하고 upstream 이 그 버전으로 올리면 패치 단계가 "이미 반영됨"을
-  찍는다 — 그때 `patches/` 에서 지운다. Opus 5.5 는 upstream 이 피커에 넣는 날 사라진다.
+  빠졌다). Opus 5.5 는 upstream 이 피커에 넣는 날 사라진다. flash-list 확인 스텝은 upstream 이
+  자기 패치를 지울 때 — 즉 flash-list 가 고쳐 릴리스할 때 — 같이 지운다.
 
 ## upstream PR 에서 더 나간 부분
 
