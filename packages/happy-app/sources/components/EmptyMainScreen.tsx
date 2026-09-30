@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Typography } from '@/constants/Typography';
 import { RoundButton } from '@/components/RoundButton';
 import { useConnectTerminal } from '@/hooks/useConnectTerminal';
+import { useAuth } from '@/auth/AuthContext';
 import { Modal } from '@/modal';
 import { t } from '@/text';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
@@ -139,6 +140,9 @@ const stylesheet = StyleSheet.create((theme) => ({
         color: theme.colors.textSecondary,
         ...Typography.default('semiBold'),
     },
+    secondaryActionTextDestructive: {
+        color: theme.colors.textDestructive,
+    },
 }));
 
 export function EmptyMainScreen({
@@ -149,6 +153,7 @@ export function EmptyMainScreen({
     onShowArchived?: () => void;
 }) {
     const { connectTerminal, connectWithUrl, isLoading } = useConnectTerminal();
+    const auth = useAuth();
     const { theme } = useUnistyles();
     const styles = stylesheet;
     const router = useRouter();
@@ -167,6 +172,23 @@ export function EmptyMainScreen({
             <Text style={styles.secondaryActionText}>{t('sidebar.showArchived')}</Text>
         </Pressable>
     ) : null;
+    // The way off this screen when the account is the wrong one. Native phones
+    // get this from the gear on OnboardingLinkComputer, which web and macOS
+    // never reach (shouldShowFirstRunInstall excludes both), leaving them with
+    // no exit short of Settings > Account > Danger Zone. Offered only while no
+    // computer is linked — that is what makes it safe, and it is the same
+    // wording and confirmation as the onboarding gear.
+    const logout = React.useCallback(async () => {
+        const confirmed = await Modal.confirm(
+            t('onboarding.logoutConfirmTitle'),
+            t('onboarding.logoutConfirmBody'),
+            { confirmText: t('common.logout'), destructive: true },
+        );
+        if (confirmed) {
+            await auth.logout();
+        }
+    }, [auth]);
+
     const enterUrlManually = React.useCallback(async () => {
         const url = await Modal.prompt(
             t('modals.authenticateTerminal'),
@@ -284,6 +306,18 @@ export function EmptyMainScreen({
                 </>
             )}
             {showArchivedAction}
+            <Pressable
+                onPress={() => { void logout(); }}
+                accessibilityRole="button"
+                style={({ pressed }) => [
+                    styles.secondaryAction,
+                    pressed && styles.secondaryActionPressed,
+                ]}
+            >
+                <Text style={[styles.secondaryActionText, styles.secondaryActionTextDestructive]}>
+                    {t('onboarding.logoutStartOver')}
+                </Text>
+            </Pressable>
         </ScrollView>
     );
 }
