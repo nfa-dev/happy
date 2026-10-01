@@ -32,6 +32,10 @@ import {
     type ClaudeGoalStatusTranscriptEvent,
 } from '@/claude/claudeGoalStatus';
 import { Session } from './session';
+import { accountConfigDir, applyActiveAccountToEnv } from '@/claude/accounts/registry';
+import { applyBalanceStartAccount } from '@/claude/accounts/switchController';
+import { syncMcpServersToAccountDir, syncUserConfigToAccountDir } from '@/claude/accounts/dirs';
+import { migrateLegacyAccountLayout } from '@/claude/accounts/migrate';
 import { applySandboxPermissionPolicy, normalizeRemotePermissionMode, resolveInitialClaudePermissionMode, resolveRemoteClaudePermissionMode } from './utils/permissionMode';
 import { decodeBase64, encodeBase64 } from '@/api/encryption';
 import type { Session as ApiSession } from '@/api/types';
@@ -91,6 +95,45 @@ export async function runClaude(credentials: Credentials, options: StartOptions 
 
     // Set backend for offline warnings (before any API calls)
     connectionState.setBackend('Claude');
+
+    // Installs from before the move keep Claude accounts (and possibly all
+    // session history) inside the happy home, where `happy auth logout`
+    // deletes them — move them out before the registry is consulted.
+    const layoutMigration = await migrateLegacyAccountLayout();
+    for (const line of layoutMigration.moved) {
+        logger.debug(`[START] Moved out of the happy home: ${line}`);
+    }
+    for (const line of layoutMigration.pending) {
+        logger.debug(`[START] Not moved out of the happy home yet: ${line}`);
+    }
+
+    // Run under the active registered Claude account, if one is selected.
+    // Must happen before anything spawns claude — the config dir travels via
+    // process.env into both the SDK query env snapshot and the local PTY env.
+    // Under the balance strategy, first steer activeAccountId to the
+    // least-utilized account so new sessions don't all pile onto the account
+    // the last switch landed on (judged on the Fable window for a Fable start).
+    await applyBalanceStartAccount(options.model);
+    const activeAccount = await applyActiveAccountToEnv();
+    if (activeAccount) {
+        logger.debug(`[START] Claude account: ${activeAccount.id}`);
+        // Keep the account dir in step with the default login before claude
+        // spawns: MCP registrations in .claude.json, then the rest of the
+        // user-scope config (settings.json hooks, CLAUDE.md, rules/, skills/).
+        // Claude resolves all of it from the account config dir, which starts
+        // out holding nothing but credentials.
+        const activeConfigDir = accountConfigDir(activeAccount)!;
+        try {
+            syncMcpServersToAccountDir(activeConfigDir);
+        } catch (e) {
+            logger.debug('[START] MCP sync into account dir failed (continuing)', e);
+        }
+        try {
+            syncUserConfigToAccountDir(activeConfigDir);
+        } catch (e) {
+            logger.debug('[START] User config sync into account dir failed (continuing)', e);
+        }
+    }
 
     // Create session service
     const api = await ApiClient.create(credentials);

@@ -6,9 +6,10 @@ import React from "react";
 import { claudeRemote } from "./claudeRemote";
 import { claudeProviderAuthErrorMessage } from './utils/providerAuth';
 import { PermissionHandler } from "./utils/permissionHandler";
+import { createAccountSwitchController } from "./accounts/switchController";
 import { mergeUsageLimits } from "./utils/usageLimits";
 import { Future } from "@/utils/future";
-import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from "./sdk";
+import { SDKAssistantMessage, SDKMessage, SDKSystemMessage, SDKUserMessage } from "./sdk";
 import { formatClaudeMessageForInk } from "@/ui/messageFormatterInk";
 import { logger } from "@/ui/logger";
 import { SDKToLogConverter } from "./utils/sdkToLogConverter";
@@ -106,6 +107,15 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
     // Create permission handler
     const permissionHandler = new PermissionHandler(session);
 
+    // Account auto-switch (Phase 2): consumes Layer 1 usage data and decides
+    // at turn boundaries whether to resume the session under another account.
+    const accountSwitch = createAccountSwitchController({
+        notify: (message) => {
+            messageBuffer.addMessage(message, 'status');
+            session.client.sendSessionEvent({ type: 'message', message });
+        },
+    });
+
     // Drop any permission requests left over in agent state from a
     // previous CLI process that died while a tool prompt was open. The
     // in-memory pendingRequests map is fresh and empty, but the server
@@ -157,6 +167,13 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
     let notifiedQuestionToolCalls = new Set<string>();
 
     function onMessage(message: SDKMessage) {
+
+        // The model this query resolved to (the app may leave it to Claude's
+        // default): a model capped on its own weekly window (Fable) switches
+        // accounts on that window.
+        if (message.type === 'system' && message.subtype === 'init') {
+            accountSwitch.noteModel((message as SDKSystemMessage).model);
+        }
 
         // Write to message log
         formatClaudeMessageForInk(message, messageBuffer);
@@ -301,6 +318,20 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
             mode: EnhancedMode;
         } | null = null;
 
+        // Reactive account switch (Phase 3): when an account-level rate limit
+        // (or, in a Fable session, the Fable limit) rejects the turn in
+        // progress, the controller switches accounts, this
+        // flag aborts the query, and the interrupted instruction is re-injected
+        // via `pending` so the restarted query re-runs it under the new account.
+        let accountSwitchRestart = false;
+        let lastDispatched: { message: MessageParam['content']; mode: EnhancedMode } | null = null;
+        let reinjectCount = 0;
+        const MAX_REINJECTIONS_PER_INSTRUCTION = 3;
+        // Re-inject only turns that never produced a result: if the (rejected)
+        // result landed before our abort, the instruction already ran to some
+        // conclusion and re-running it could duplicate side effects.
+        let resultReceivedSinceDispatch = true;
+
         // Track session ID to detect when it actually changes
         // This prevents context loss when mode changes (permission mode, model, etc.)
         // without starting a new session. Only reset parent chain when session ID
@@ -327,6 +358,12 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
             const controller = new AbortController();
             abortController = controller;
             abortFuture = new Future<void>();
+            // Layer 1 events from this query belong to the account it launched
+            // under. After a switch the aborted query can still flush a final
+            // (rejected) rate-limit patch — feeding that to the controller
+            // would poison the NEW account's window state and cascade into a
+            // spurious cooldown that parks a healthy account.
+            const queryEpoch = accountSwitch.epoch();
             let modeHash: string | null = null;
             let mode: EnhancedMode | null = null;
             // Abnormal turn end decided by the branches below; emitted in
@@ -346,10 +383,27 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                         return permissionHandler.isAborted(toolCallId);
                     },
                     nextMessage: async () => {
+                        // Turn boundary: decide account switch before waiting
+                        // for the next instruction. Returning null ends the
+                        // current query; the while loop resumes the same
+                        // session under the repointed CLAUDE_CONFIG_DIR. A
+                        // pending instruction (mode change, retry) is judged
+                        // on the model it is about to run.
+                        if (pending) {
+                            accountSwitch.noteModel(pending.mode.model);
+                        }
+                        if (await accountSwitch.maybeSwitchAtTurnBoundary()) {
+                            return null;
+                        }
+                        // Every account exhausted: hold dispatch (instructions
+                        // keep queueing) until the earliest reset or an abort.
+                        await accountSwitch.waitIfParked(controller.signal);
                         if (pending) {
                             let p = pending;
                             pending = null;
                             permissionHandler.handleModeChange(p.mode.permissionMode);
+                            lastDispatched = p;
+                            resultReceivedSinceDispatch = false;
                             return p;
                         }
 
@@ -365,6 +419,9 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             modeHash = msg.hash;
                             mode = msg.mode;
                             permissionHandler.handleModeChange(mode.permissionMode);
+                            // A fresh instruction resets the reactive-retry budget
+                            // (re-injections replay through `pending`, not here).
+                            reinjectCount = 0;
                             // Self-heal: a fresh instruction always begins a new turn.
                             // If a previous turn is somehow still open (a path that
                             // missed its turn-end), close it now — ordered ahead of
@@ -376,6 +433,7 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             // Per-message attachments are already claimed by the message
                             // when it was pushed onto the queue, so there is no race window
                             // to wait out here — just consume what travelled with the batch.
+                            let content: MessageParam['content'] = msg.message;
                             const attachments = msg.attachments ?? [];
                             if (attachments.length > 0) {
                                 const contentBlocks: ContentBlockParam[] = [];
@@ -403,16 +461,23 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                                 }
                                 contentBlocks.push({ type: 'text' as const, text: msg.message });
                                 logger.debug(`[remote] Combined ${contentBlocks.length - 1} image(s) with text message`);
-                                return {
-                                    message: contentBlocks,
-                                    mode: msg.mode,
-                                };
+                                content = contentBlocks;
+                            }
+                            const dispatch = { message: content, mode: msg.mode };
+
+                            // The boundary check above ran before this instruction's
+                            // model was known. When it moves the session onto a model
+                            // capped on its own weekly window (a first Fable
+                            // instruction), check again rather than dispatch into a
+                            // window that is already spent.
+                            if (accountSwitch.noteModel(msg.mode.model) && await accountSwitch.maybeSwitchAtTurnBoundary()) {
+                                pending = dispatch;
+                                return null;
                             }
 
-                            return {
-                                message: msg.message,
-                                mode: msg.mode
-                            }
+                            lastDispatched = dispatch;
+                            resultReceivedSinceDispatch = false;
+                            return lastDispatched;
                         }
 
                         // Exit
@@ -433,7 +498,36 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                             skills: metadata.skills,
                         }));
                     },
+                    onAccountRateLimited: (info) => {
+                        // Reactive path: decide off the SDK message loop, then cut
+                        // the turn short. If no other account is usable the turn is
+                        // left to end on its own (parking engages at the boundary).
+                        void (async () => {
+                            try {
+                                if (accountSwitch.epoch() !== queryEpoch) {
+                                    return; // stale query — the rejection belongs to a previous account
+                                }
+                                if (accountSwitchRestart || controller.signal.aborted) {
+                                    return;
+                                }
+                                if (!(await accountSwitch.handleMidTurnRejection(info))) {
+                                    return;
+                                }
+                                if (accountSwitchRestart || controller.signal.aborted) {
+                                    return; // a user abort raced the switch — don't restart
+                                }
+                                accountSwitchRestart = true;
+                                controller.abort();
+                            } catch (e) {
+                                logger.debug('[remote]: mid-turn account switch failed', e);
+                            }
+                        })();
+                    },
                     onUsageLimits: (patch) => {
+                        if (accountSwitch.epoch() !== queryEpoch) {
+                            return; // stale query — data from the pre-switch account
+                        }
+                        accountSwitch.noteUsageLimits(patch);
                         // Merging against currentAgentState re-hydrates window
                         // state across claudeRemote re-entries (mode switches).
                         session.client.updateAgentState((currentAgentState) => ({
@@ -459,6 +553,7 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                         session.clearSessionId();
                     },
                     onReady: async (status) => {
+                        resultReceivedSinceDispatch = true;
                         // Enqueued, not sent: the turn-end lands behind the turn's
                         // own messages rather than overtaking them. The flush below
                         // then delivers both before an auth-failed turn is handed
@@ -482,8 +577,28 @@ export async function claudeRemoteLauncher(session: Session): Promise<'switch' |
                 
                 // Consume one-time Claude flags after spawn
                 session.consumeOneTimeFlags();
-                
-                if (!exitReason && abortController.signal.aborted) {
+
+                if (accountSwitchRestart) {
+                    // The abort was ours, not the user's: re-run the interrupted
+                    // instruction under the new account via the pending replay
+                    // path. The turn is deliberately left open — the retry is its
+                    // continuation, and the eventual result closes it as usual.
+                    accountSwitchRestart = false;
+                    if (resultReceivedSinceDispatch) {
+                        // The rejected turn still delivered its result before the
+                        // abort landed — the account is switched, but re-running
+                        // the instruction could duplicate completed side effects.
+                        logger.debug('[remote]: account switch restart without re-injection (turn already produced a result)');
+                    } else if (lastDispatched && reinjectCount < MAX_REINJECTIONS_PER_INSTRUCTION) {
+                        reinjectCount++;
+                        pending = lastDispatched;
+                        messageBuffer.addMessage('Retrying interrupted instruction under the new account...', 'status');
+                        session.client.sendSessionEvent({ type: 'message', message: 'Retrying the interrupted instruction under the new account.' });
+                    } else if (lastDispatched) {
+                        closeStatus = 'failed';
+                        session.client.sendSessionEvent({ type: 'message', message: `Instruction was rate-limited ${MAX_REINJECTIONS_PER_INSTRUCTION} times across accounts — automatic retry stopped. Send it again to retry.` });
+                    }
+                } else if (!exitReason && abortController.signal.aborted) {
                     closeStatus = 'cancelled';
                     session.client.sendSessionEvent({ type: 'message', message: 'Aborted by user' });
                 }

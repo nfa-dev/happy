@@ -77,6 +77,8 @@ export function applyEnvironmentToProcess(env: IntegrationEnvironment) {
     process.env.HAPPY_SERVER_URL = `http://localhost:${env.serverPort}`;
     process.env.HAPPY_WEBAPP_URL = `http://localhost:${env.expoPort}`;
     process.env.HAPPY_HOME_DIR = join(env.envDir, 'cli', 'home');
+    // The Claude account registry lives outside the happy home; keep tests off the real one
+    process.env.HAPPY_CLAUDE_ACCOUNTS_DIR = join(env.envDir, 'cli', 'claude-accounts');
     process.env.HAPPY_PROJECT_DIR = env.projectPath;
     process.env.HAPPY_VARIANT = 'dev';
     process.env.DEBUG = '1';

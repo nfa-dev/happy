@@ -22,6 +22,7 @@ export async function installIntegrationEnvironment(profile: IntegrationEnvironm
         HAPPY_SERVER_URL: process.env.HAPPY_SERVER_URL,
         HAPPY_WEBAPP_URL: process.env.HAPPY_WEBAPP_URL,
         HAPPY_HOME_DIR: process.env.HAPPY_HOME_DIR,
+        HAPPY_CLAUDE_ACCOUNTS_DIR: process.env.HAPPY_CLAUDE_ACCOUNTS_DIR,
         HAPPY_PROJECT_DIR: process.env.HAPPY_PROJECT_DIR,
         HAPPY_VARIANT: process.env.HAPPY_VARIANT,
         DEBUG: process.env.DEBUG,

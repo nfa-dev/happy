@@ -2,14 +2,26 @@
  * Normalizes plan rate-limit data from the two Claude SDK sources into the
  * backend-neutral UsageLimits shape carried in session agent state:
  *
- * - `rate_limit_event` (push): one window per event — whichever limit
- *   currently binds. `rateLimitType` may be absent, utilization is a 0-1
- *   fraction, `resetsAt` is unix seconds (derived from the
- *   anthropic-ratelimit-unified-reset header).
+ * - `rate_limit_event` (push): the status of whichever limit currently
+ *   binds. `rateLimitType` may be absent, utilization is a 0-1 fraction,
+ *   `resetsAt` is unix seconds (derived from the
+ *   anthropic-ratelimit-unified-reset header). Newer CLIs add
+ *   `unifiedWindows`, the utilization of every window the response headers
+ *   carried, binding or not.
  * - `get_usage` (pull): all windows at once. Utilization is 0-100,
  *   `resets_at` is an ISO 8601 string, and windows carry no status.
  */
 import type { UsageLimits, UsageLimitWindow, UsageLimitWindowStatus } from '@/api/types';
+
+/**
+ * rate_limit_event id of the weekly window of a model capped on its own.
+ * Claude Code 2.1.280 calls it the "Fable limit" (Fable is its only
+ * overage-included model) and get_usage reports the same window as the
+ * model_scoped row named 'Fable'; the response header only appears on
+ * requests to that model.
+ */
+export const MODEL_SCOPED_WINDOW_ID = 'seven_day_overage_included';
+const MODEL_SCOPED_WINDOW_LABEL = 'Fable weekly';
 
 export type UnboundRateLimit = {
     status: UsageLimitWindowStatus,
@@ -47,6 +59,13 @@ function normalizeEventUtilization(u: number | undefined): number | undefined {
     return Math.min(100, Math.max(0, Math.round(percent * 10) / 10));
 }
 
+// unifiedWindows are documented as fractions that exceed 1 when usage runs
+// past a cap (grace), which the <=1 percent guard above would misread as ~1%.
+function normalizeFraction(u: number | undefined): number | undefined {
+    if (typeof u !== 'number' || !Number.isFinite(u)) return undefined;
+    return Math.min(100, Math.max(0, Math.round(u * 1000) / 10));
+}
+
 // Event resetsAt is unix seconds; agent state carries epoch ms.
 function normalizeEventResetsAt(n: number | undefined): number | undefined {
     if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return undefined;
@@ -66,6 +85,10 @@ export function windowsFromGetUsage(rateLimits: Record<string, unknown>): UsageL
     for (const [id, value] of Object.entries(rateLimits)) {
         // Extra usage is billing/overage state, not a plan rate-limit window.
         if (id === 'extra_usage') continue;
+        if (id === 'model_scoped') {
+            windows.push(...windowsFromModelScoped(value));
+            continue;
+        }
         if (!value || typeof value !== 'object') continue;
         // Only entries with the rate-limit window shape.
         if (!('utilization' in value) && !('resets_at' in value)) continue;
@@ -83,27 +106,78 @@ export function windowsFromGetUsage(rateLimits: Record<string, unknown>): UsageL
     return windows;
 }
 
+/**
+ * get_usage's model_scoped rows (per-model weekly windows, filtered by Claude
+ * Code's allowlist). Fable's row is the window rate_limit_event reports as
+ * seven_day_overage_included, so it takes that id: one window, two sources.
+ */
+function windowsFromModelScoped(rows: unknown): UsageLimitWindow[] {
+    if (!Array.isArray(rows)) return [];
+    return rows.flatMap((row): UsageLimitWindow[] => {
+        if (typeof row?.display_name !== 'string' || !/\bfable\b/i.test(row.display_name)) return [];
+        const utilization = typeof row.utilization === 'number' && Number.isFinite(row.utilization)
+            ? Math.min(100, Math.max(0, row.utilization))
+            : null;
+        return [{
+            id: MODEL_SCOPED_WINDOW_ID,
+            label: MODEL_SCOPED_WINDOW_LABEL,
+            utilization,
+            resetsAt: normalizeIsoResetsAt(row.resets_at),
+            status: synthesizeStatus(utilization),
+        }];
+    });
+}
+
+type UnifiedWindow = { utilization?: number, resetsAt?: number } | null | undefined;
+
 export type RateLimitEventInfo = {
     status: UsageLimitWindowStatus,
     rateLimitType?: string,
     utilization?: number,
     resetsAt?: number,
+    /**
+     * Every window the response headers carried (five_hour, seven_day and, on
+     * a Fable request, seven_day_overage_included), binding or not. Marked
+     * @internal in the SDK schema; absent on older CLIs.
+     */
+    unifiedWindows?: Record<string, UnifiedWindow>,
 }
 
-export function fromRateLimitEvent(info: RateLimitEventInfo): { window?: UsageLimitWindow, unbound?: UnboundRateLimit } {
+/**
+ * The binding window carries the event's status. The other unifiedWindows
+ * entries carry utilization only: the event says nothing about their status,
+ * so consumers grade them by utilization.
+ */
+export function fromRateLimitEvent(info: RateLimitEventInfo): { windows: UsageLimitWindow[], unbound?: UnboundRateLimit } {
+    const unified: Record<string, UnifiedWindow> = info.unifiedWindows && typeof info.unifiedWindows === 'object'
+        ? info.unifiedWindows
+        : {};
+    const withLabel = (window: UsageLimitWindow): UsageLimitWindow =>
+        window.id === MODEL_SCOPED_WINDOW_ID ? { ...window, label: MODEL_SCOPED_WINDOW_LABEL } : window;
+    const windows: UsageLimitWindow[] = [];
+    let unbound: UnboundRateLimit | undefined;
     const utilization = normalizeEventUtilization(info.utilization);
     const resetsAt = normalizeEventResetsAt(info.resetsAt);
     if (info.rateLimitType) {
-        return {
-            window: {
-                id: info.rateLimitType,
-                status: info.status,
-                utilization: utilization ?? null,
-                resetsAt: resetsAt ?? null,
-            },
-        };
+        const binding = unified[info.rateLimitType];
+        windows.push(withLabel({
+            id: info.rateLimitType,
+            status: info.status,
+            // Allowed events carry no top-level utilization; the unified
+            // entry for the same window does, on the documented scale.
+            utilization: normalizeFraction(binding?.utilization) ?? utilization ?? null,
+            resetsAt: resetsAt ?? normalizeEventResetsAt(binding?.resetsAt) ?? null,
+        }));
+    } else {
+        unbound = { status: info.status, utilization: utilization ?? null, resetsAt: resetsAt ?? null };
     }
-    return { unbound: { status: info.status, utilization: utilization ?? null, resetsAt: resetsAt ?? null } };
+    for (const [id, window] of Object.entries(unified)) {
+        if (id === info.rateLimitType) continue;
+        const windowUtilization = normalizeFraction(window?.utilization);
+        if (windowUtilization === undefined) continue;
+        windows.push(withLabel({ id, utilization: windowUtilization, resetsAt: normalizeEventResetsAt(window?.resetsAt) ?? null }));
+    }
+    return { windows, unbound };
 }
 
 /**

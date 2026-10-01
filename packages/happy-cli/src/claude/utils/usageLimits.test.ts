@@ -33,39 +33,124 @@ describe('windowsFromGetUsage', () => {
         expect(windows[0].utilization).toBeNull();
         expect(windows[0].status).toBeUndefined();
     });
+
+    it('maps the Fable model_scoped row onto the seven_day_overage_included window', () => {
+        const windows = windowsFromGetUsage({
+            five_hour: { utilization: 5, resets_at: null },
+            model_scoped: [
+                { display_name: 'Fable', utilization: 94, resets_at: '2026-10-02T10:59:59Z' },
+                { display_name: 'Mythos', utilization: 10, resets_at: null },
+            ],
+        });
+        expect(windows.map(w => w.id)).toEqual(['five_hour', 'seven_day_overage_included']);
+        expect(windows[1]).toEqual({
+            id: 'seven_day_overage_included',
+            label: 'Fable weekly',
+            utilization: 94,
+            resetsAt: Date.parse('2026-10-02T10:59:59Z'),
+            status: 'allowed_warning',
+        });
+    });
+
+    it('ignores a model_scoped value that is not an array', () => {
+        expect(windowsFromGetUsage({ model_scoped: { display_name: 'Fable' } })).toEqual([]);
+    });
 });
 
 describe('fromRateLimitEvent', () => {
     it('converts fraction utilization and unix-seconds resetsAt', () => {
-        const { window } = fromRateLimitEvent({
+        const { windows } = fromRateLimitEvent({
             status: 'allowed',
             rateLimitType: 'five_hour',
             utilization: 0.63,
             resetsAt: 1784736000, // seconds
         });
-        expect(window).toEqual({
+        expect(windows).toEqual([{
             id: 'five_hour',
             status: 'allowed',
             utilization: 63,
             resetsAt: 1784736000_000,
-        });
+        }]);
     });
 
     it('passes already-ms resetsAt and percent utilization through the guards unchanged', () => {
-        const { window } = fromRateLimitEvent({
+        const { windows } = fromRateLimitEvent({
             status: 'allowed_warning',
             rateLimitType: 'seven_day',
             utilization: 92,
             resetsAt: 1784736000000,
         });
-        expect(window!.utilization).toBe(92);
-        expect(window!.resetsAt).toBe(1784736000000);
+        expect(windows[0].utilization).toBe(92);
+        expect(windows[0].resetsAt).toBe(1784736000000);
     });
 
     it('returns an unbound patch when rateLimitType is absent (including rejected)', () => {
-        const { window, unbound } = fromRateLimitEvent({ status: 'rejected', utilization: 1 });
-        expect(window).toBeUndefined();
+        const { windows, unbound } = fromRateLimitEvent({ status: 'rejected', utilization: 1 });
+        expect(windows).toEqual([]);
         expect(unbound).toEqual({ status: 'rejected', utilization: 100, resetsAt: null });
+    });
+
+    // A Fable session's event as Claude Code 2.1.280 emitted it (2026-09-25 log)
+    it('expands unifiedWindows: the binding window keeps the status, the others carry utilization only', () => {
+        const { windows } = fromRateLimitEvent({
+            status: 'allowed_warning',
+            resetsAt: 1790935200,
+            rateLimitType: 'seven_day_overage_included',
+            utilization: 0.75,
+            unifiedWindows: {
+                five_hour: { utilization: 0.13, resetsAt: 1790568600 },
+                seven_day: { utilization: 0.39, resetsAt: 1790935200 },
+                seven_day_overage_included: { utilization: 0.75, resetsAt: 1790935200 },
+            },
+        });
+        expect(windows).toEqual([
+            { id: 'seven_day_overage_included', label: 'Fable weekly', status: 'allowed_warning', utilization: 75, resetsAt: 1790935200_000 },
+            { id: 'five_hour', utilization: 13, resetsAt: 1790568600_000 },
+            { id: 'seven_day', utilization: 39, resetsAt: 1790935200_000 },
+        ]);
+    });
+
+    // The Fable limit rejecting a turn (2026-09-23 log): no top-level utilization
+    it('marks a rejected Fable limit on the binding window, utilization from unifiedWindows', () => {
+        const { windows } = fromRateLimitEvent({
+            status: 'rejected',
+            resetsAt: 1790334000,
+            rateLimitType: 'seven_day_overage_included',
+            unifiedWindows: {
+                five_hour: { utilization: 0.18, resetsAt: 1790160600 },
+                seven_day: { utilization: 0.61, resetsAt: 1790334000 },
+                seven_day_overage_included: { utilization: 1, resetsAt: 1790334000 },
+            },
+        });
+        expect(windows[0]).toEqual({
+            id: 'seven_day_overage_included',
+            label: 'Fable weekly',
+            status: 'rejected',
+            utilization: 100,
+            resetsAt: 1790334000_000,
+        });
+    });
+
+    it('reads a unifiedWindows value past the cap as 100%, not as a ~1% percent value', () => {
+        const { windows } = fromRateLimitEvent({
+            status: 'allowed',
+            rateLimitType: 'seven_day',
+            unifiedWindows: { five_hour: { utilization: 1.04, resetsAt: 1790843400 } },
+        });
+        expect(windows.find(w => w.id === 'five_hour')!.utilization).toBe(100);
+    });
+
+    it('applies unifiedWindows to an unbound event as well, skipping malformed entries', () => {
+        const { windows, unbound } = fromRateLimitEvent({
+            status: 'rejected',
+            unifiedWindows: {
+                five_hour: { utilization: 1, resetsAt: 1790843400 },
+                seven_day: null,
+                junk: { resetsAt: 5 },
+            },
+        });
+        expect(unbound?.status).toBe('rejected');
+        expect(windows).toEqual([{ id: 'five_hour', utilization: 100, resetsAt: 1790843400_000 }]);
     });
 });
 
@@ -131,6 +216,14 @@ describe('mergeUsageLimits', () => {
             unbound: { status: 'rejected', utilization: 100, resetsAt: null },
         });
         expect(merged.windows).toEqual([{ id: 'plan', status: 'rejected', utilization: 100, resetsAt: null }]);
+    });
+
+    it('lets a window reported without a status replace a stale one — the app grades it by utilization', () => {
+        const merged = mergeUsageLimits(
+            { capturedAt: 1, windows: [{ id: 'seven_day_overage_included', label: 'Fable weekly', status: 'rejected', utilization: 100, resetsAt: 5 }] },
+            { capturedAt: 2, windows: [{ id: 'seven_day_overage_included', label: 'Fable weekly', utilization: 3, resetsAt: 9 }] },
+        );
+        expect(merged.windows).toEqual([{ id: 'seven_day_overage_included', label: 'Fable weekly', utilization: 3, resetsAt: 9 }]);
     });
 
     it('tolerates malformed current agent state (windows not an array)', () => {

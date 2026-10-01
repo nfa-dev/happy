@@ -14,6 +14,7 @@ import * as z from 'zod';
 import { encodeBase64, decodeBase64 } from '@/api/encryption';
 import type { Metadata } from '@/api/types';
 import { logger } from '@/ui/logger';
+import { ClaudeAccountSwitchSchema, type ClaudeAccountSwitchSettings } from '@/claude/accounts/types';
 
 export const SandboxConfigSchema = z.object({
   enabled: z.boolean().default(false),
@@ -34,9 +35,9 @@ export type SandboxConfig = z.infer<typeof SandboxConfigSchema>;
 // Settings schema version: Integer for overall Settings structure compatibility
 // Incremented when Settings structure changes (e.g., adding profiles array was v1→v2)
 // Used for migration logic in readSettings()
-export const SUPPORTED_SCHEMA_VERSION = 2;
+export const SUPPORTED_SCHEMA_VERSION = 3;
 
-interface Settings {
+export interface Settings {
   schemaVersion: number
   onboardingCompleted: boolean
   machineId?: string
@@ -46,6 +47,8 @@ interface Settings {
   sandboxConfig?: SandboxConfig
   serverUrl?: string
   webappUrl?: string
+  /** Legacy home of the Claude account registry; migrate.ts moves it to ~/.claude-accounts/accounts.json */
+  claudeAccountSwitch?: ClaudeAccountSwitchSettings
 }
 
 const defaultSettings: Settings = {
@@ -61,8 +64,11 @@ const defaultSettings: Settings = {
 function migrateSettings(raw: any, fromVersion: number): any {
   let migrated = { ...raw };
 
+  // v3: added optional claudeAccountSwitch (Claude multi-account registry).
+  // Purely additive — nothing to transform for older files.
+
   // Future migrations go here:
-  // if (fromVersion < 3) { ... }
+  // if (fromVersion < 4) { ... }
 
   return migrated;
 }
@@ -110,6 +116,15 @@ export async function readSettings(): Promise<Settings> {
       } catch (error: any) {
         logger.warn(`⚠️ Invalid sandbox config - skipping. Error: ${error.message}`);
         migrated.sandboxConfig = undefined;
+      }
+    }
+
+    if (migrated.claudeAccountSwitch !== undefined) {
+      try {
+        migrated.claudeAccountSwitch = ClaudeAccountSwitchSchema.parse(migrated.claudeAccountSwitch);
+      } catch (error: any) {
+        logger.warn(`⚠️ Invalid claudeAccountSwitch config - skipping. Error: ${error.message}`);
+        migrated.claudeAccountSwitch = undefined;
       }
     }
 

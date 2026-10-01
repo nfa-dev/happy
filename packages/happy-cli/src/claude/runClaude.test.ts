@@ -88,6 +88,24 @@ vi.mock('@/claude/claudeLocal', () => ({
     claudeLocal: vi.fn(),
 }));
 
+// Unmocked, runClaude moves the real ~/.claude/projects and ~/.happy account dirs around
+vi.mock('@/claude/accounts/migrate', () => ({
+    migrateLegacyAccountLayout: vi.fn(async () => ({ moved: [], pending: [], keep: [] })),
+}));
+
+// Unmocked, runClaude reads the real ~/.claude-accounts registry: under the
+// balance strategy it polls usage with the real logins and may move
+// activeAccountId, and the active account's dir gets the default login's
+// config synced into it
+vi.mock('@/claude/accounts/switchController', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@/claude/accounts/switchController')>()),
+    applyBalanceStartAccount: vi.fn(async () => {}),
+}));
+vi.mock('@/claude/accounts/registry', async (importOriginal) => ({
+    ...(await importOriginal<typeof import('@/claude/accounts/registry')>()),
+    applyActiveAccountToEnv: vi.fn(async () => null),
+}));
+
 import { runClaude } from './runClaude';
 
 function createDeferred<T>() {

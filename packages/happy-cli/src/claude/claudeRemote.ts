@@ -12,7 +12,7 @@ import { awaitFileExist } from "@/modules/watcher/awaitFileExist";
 import { systemPrompt } from "./utils/systemPrompt";
 import { PermissionResult } from "./sdk/types";
 import type { JsRuntime } from "./runClaude";
-import { fromRateLimitEvent, windowsFromGetUsage, type UnboundRateLimit, type UsageLimitsPatch, type RateLimitEventInfo } from "./utils/usageLimits";
+import { fromRateLimitEvent, windowsFromGetUsage, MODEL_SCOPED_WINDOW_ID, type UnboundRateLimit, type UsageLimitsPatch, type RateLimitEventInfo } from "./utils/usageLimits";
 import type { UsageLimitWindow } from "@/api/types";
 import { pluginsFromArgs } from './utils/pluginsFromArgs';
 import { claudeProviderAuthMessage } from './utils/providerAuth';
@@ -48,7 +48,17 @@ export async function claudeRemote(opts: {
     onSessionReset?: () => void,
     onSDKMetadata?: (metadata: { tools?: string[]; slashCommands?: string[]; mcpServers?: { name: string; status: string }[]; skills?: string[] }) => void,
     /** Per-turn plan rate-limit delta; the launcher merges it into agent state. */
-    onUsageLimits?: (patch: UsageLimitsPatch) => void
+    onUsageLimits?: (patch: UsageLimitsPatch) => void,
+    /**
+     * Fired the moment a rate limit that another account can lift rejects
+     * mid-turn: five_hour/seven_day, an unbound rejection (windowId null), or
+     * the weekly window of a model capped on its own (MODEL_SCOPED_WINDOW_ID,
+     * the Fable limit — the controller acts on it only while the session runs
+     * that model). The legacy seven_day_<model> windows are excluded. Unlike
+     * onUsageLimits this is not coalesced to the next result: a rejected turn
+     * may never produce one, and the reactive account switch needs to act now.
+     */
+    onAccountRateLimited?: (info: { windowId: string | null, resetsAt: number | null }) => void
 }) {
 
     // Check if session is valid
@@ -325,10 +335,28 @@ export async function claudeRemote(opts: {
                 const info = (message as { rate_limit_info?: RateLimitEventInfo }).rate_limit_info;
                 if (info) {
                     const normalized = fromRateLimitEvent(info);
-                    if (normalized.window) {
-                        pendingUsageWindows.set(normalized.window.id, normalized.window);
-                    } else if (normalized.unbound) {
+                    for (const window of normalized.windows) {
+                        // A non-binding unifiedWindows entry has no status of its
+                        // own: keep the one an earlier event of this turn reported,
+                        // or a rejection would be gone by the turn boundary.
+                        const buffered = pendingUsageWindows.get(window.id);
+                        pendingUsageWindows.set(window.id, window.status === undefined && buffered?.status
+                            ? { ...window, status: buffered.status }
+                            : window);
+                    }
+                    if (normalized.unbound) {
                         pendingUnbound = normalized.unbound;
+                    }
+                    const windowId = info.rateLimitType ?? null;
+                    const switchable = windowId === null || windowId === 'five_hour' || windowId === 'seven_day'
+                        || windowId === MODEL_SCOPED_WINDOW_ID;
+                    if (info.status === 'rejected' && switchable && opts.onAccountRateLimited) {
+                        opts.onAccountRateLimited({
+                            windowId,
+                            resetsAt: normalized.windows.find(w => w.id === windowId)?.resetsAt
+                                ?? normalized.unbound?.resetsAt
+                                ?? null,
+                        });
                     }
                 }
             }
