@@ -1,6 +1,6 @@
 {
   "name": "happy",
-  "version": "1.2.5",
+  "version": "1.2.5-navercorp",
   "description": "Mobile and Web client for Claude Code and Codex",
   "author": "Kirill Dubovitskiy",
   "license": "MIT",
@@ -71,7 +71,8 @@
     "test:integration": "pnpm run build && vitest run --project integration-empty --project integration-plan-mode --project integration-authenticated",
     "cli:install": "node scripts/install-local.cjs",
     "prepublishOnly": "pnpm test",
-    "postinstall": "node scripts/unpack-tools.cjs"
+    "postinstall": "node scripts/unpack-tools.cjs",
+    "publish:nexus": "node scripts/publish-nexus.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.14.1",
