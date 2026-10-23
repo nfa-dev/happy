@@ -3,8 +3,8 @@ name: Deploy web to Pages
 # happy-app 을 Expo web 으로 export 해서 GitHub Pages 에 올린다.
 # 결과: https://nfa-dev.github.io/happy/
 #
-# 이 브랜치(pages)는 upstream main 위에 웹 키보드 스크롤 수정, 모델 피커 한 건, 이 워크플로만 얹은 것이다.
-# 자세한 내용은 .github/pages/README.md.
+# 이 브랜치(pages)는 upstream main 위에 이 포크의 커밋(웹 앱, CLI·agent, 서버)을 얹은 것이다.
+# 웹 빌드에 들어가는 것은 happy-app 쪽 수정뿐이다. 자세한 내용은 .github/pages/README.md.
 
 on:
   workflow_dispatch:

@@ -1,13 +1,23 @@
-# `pages` 브랜치 — 웹 빌드를 GitHub Pages 로
+# `pages` 브랜치
 
-[slopus/happy](https://github.com/slopus/happy) 의 `packages/happy-app` 을 Expo web 으로 export 해서
-<https://nfa-dev.github.io/happy/> 에 올린다. upstream 이 아직 머지하지 않은 **웹 키보드 스크롤
-수정**을 얹은 빌드를 쓰려는 것이 목적이고, 그 외에는 upstream 그대로다. 휠 방향과 FlashList 측정은
-2026-09 에 upstream 이 둘 다 직접 고쳐서 여기서는 빠졌다 — 이제 로컬 패치가 하나도 없다.
+[slopus/happy](https://github.com/slopus/happy) 포크의 작업 브랜치다. upstream `main` 위에 우리 커밋을
+얹고, 웹 앱과 CLI·agent, self-host 서버를 모두 이 브랜치에서 빌드한다.
 
-## 왜
+| 산출물 | 패키지 | 배포 |
+|---|---|---|
+| 웹 앱 | `packages/happy-app` | 이 저장소의 Actions 가 Expo web 으로 export 해서 <https://nfa-dev.github.io/happy/> 에 올린다 |
+| CLI·agent | `packages/happy-cli`, `packages/happy-agent` | `<upstream 버전>-navercorp` 로 Nexus npm 저장소에 게시한다 |
+| 서버 | `packages/happy-server` | self-host relay 이미지가 이 브랜치의 커밋을 받아 빌드한다 |
+
+CLI 와 agent 의 변경은 2026-10 까지 별도 포크의 버전 브랜치에 있었고, 2026-10-23 기능별 커밋으로 옮겨
+와 이 브랜치 하나로 합쳤다. 공개 저장소이므로 사내 호스트명이나 내부 프로젝트명은 소스와 커밋에
+남기지 않는다. 게시 대상 Nexus 주소도 환경변수로만 받는다.
+
+## 웹 키보드 수정을 얹은 이유
 
 웹(데스크톱 브라우저)에서만 채팅 히스토리를 사실상 볼 수 없었다. 네이티브 앱은 셋 다 멀쩡하다.
+휠 방향과 FlashList 측정은 2026-09 에 upstream 이 둘 다 직접 고쳐서 여기서는 빠졌고, 남은 것은
+키보드 스크롤이다.
 
 | 증상 | 원인 | upstream |
 |---|---|---|
@@ -17,7 +27,10 @@
 
 ## 구성
 
-이 브랜치는 upstream `main` 위에 커밋 몇 개뿐이다. rebase 를 쉽게 두려고 일부러 작게 유지한다.
+rebase 를 쉽게 두려고 기능 하나에 커밋 하나만 둔다. upstream 이 같은 수정을 받아들이면 그 커밋은
+rebase 때 빠진다.
+
+### 웹 앱
 
 1. `fix(app): correct inverted chat keyboard scroll direction on web` — 드래프트 PR #1518 의 포팅.
    키 매핑과 테스트는 그 PR 그대로, 배선만 지금 리스트에 맞췄다(#1518 은 FlatList 시절 ChatList 를
@@ -27,7 +40,30 @@
    더하고 기본 모델을 거기로 옮긴다. upstream 은 Fable 5.1 까지만 올려두었다.
 3. upstream 휠 수정의 effect 의존성에 `props.active` 하나를 더한 것. upstream 은
    `handoffListRevision` 과 `props.sessionId` 만 본다.
-4. 이 디렉토리와 `.github/workflows/pages.yml`.
+4. 웹의 "Connect your computer" 화면에 로그아웃을 두고, 폰 브라우저에서 앱 하단이 잘리던 것을
+   `100dvh` 로 고친 두 커밋. 둘 다 upstream 에 같은 버그가 있다.
+5. 이 디렉토리와 `.github/workflows/pages.yml`.
+
+### CLI·agent
+
+| 커밋 | 내용 |
+|---|---|
+| `chore(cli): stamp the fork version and publish to Nexus` | 버전을 `<upstream>-navercorp` 로 찍고 `scripts/publish-nexus.mjs` 로 게시한다 |
+| `feat(cli): --auto-resume daemon flag …` | 데몬이 스스로 재기동될 때(pod 등) 영속 세션을 자동으로 되살린다 |
+| `fix(cli): route turn-end through the outgoing queue …` | turn-end 가 그 턴의 마지막 메시지를 앞지르던 버그. upstream 에 낼 몫이다 |
+| `feat(cli): switch between several Claude logins automatically` | `happy accounts`, 사용량에 따른 계정 전환, Fable 주간 한도 |
+| `feat(cli): show the build revision in --version and doctor` | `dist/build-info.json` 의 커밋으로 같은 버전의 빌드를 구분한다 |
+| ``feat(cli): `happy auth server` …`` | 서버·웹앱 URL 을 `settings.json` 에 저장한다 |
+| `feat(cli): carry /loop wakeups and session cron jobs …` | query 를 다시 띄울 때 사라지던 /loop·세션 cron 을 되살린다 |
+| `feat(agent): secret-key restore, a library entry and spawn options` | `auth restore`, `happy-agent/lib`, spawn 옵션 전달 |
+
+### 서버
+
+`feat(server): relay blob transfers through the server in S3 mode` 하나다. upstream 은 S3 를 쓰면
+첨부와 아바타를 presigned POST·GET 으로 버킷에 직접 주고받게 한다. NCP Object Storage 는 POST policy
+업로드에 405 를 돌려주고 내부 endpoint 는 http 라서, https 웹 앱에서는 이미지 첨부가 전부 실패했다.
+이 커밋은 S3 모드에서도 바이트를 서버가 받아 저장하고 내려준다. `S3_DIRECT_TRANSFERS=true` 를 주면
+upstream 동작으로 돌아간다.
 
 FlashList 수정은 `node_modules` 를 고치는 것이라 소스 커밋이 안 된다. 한동안 이 디렉토리에
 `patches/0002-...` 로 두고 워크플로가 `pnpm install` 뒤에 얹었는데, upstream 이 같은 버그를
@@ -62,13 +98,22 @@ FlashList 수정은 `node_modules` 를 고치는 것이라 소스 커밋이 안 
 ## 운영
 
 - **재배포**: Actions → "Deploy web to Pages" → Run workflow. `pages` 브랜치에 push 해도 돈다.
+  CLI·서버만 바뀐 push 도 웹을 다시 배포하지만 결과물은 같다.
 - **업스트림 따라가기**: `git fetch upstream && git rebase upstream/main` → push (force). 패치가 안
   붙으면 빌드가 죽으니 조용히 어긋날 일은 없다.
+- **CLI·agent 게시**: 각 패키지에서 `NEXUS_BASE_URL=<Nexus 주소> pnpm run publish:nexus`. 배포 계정은
+  `NEXUS_NPM_AUTH` 나 `~/.npmrc` 의 `_auth` 줄로 준다. 같은 버전 번호로 다시 게시하므로 설치본이 어느
+  빌드인지는 `dist/build-info.json` 의 커밋으로 본다. 이 브랜치는 upstream 의 릴리스 태그가 아니라
+  `main` 을 따라가니, rebase 뒤 게시하기 전에 `git log cli-<마지막 릴리스>..upstream/main --
+  packages/happy-cli` 로 아직 릴리스되지 않은 upstream CLI 변경이 딸려 오는지 확인한다.
+- **서버**: relay 이미지는 이 브랜치의 커밋을 SHA 로 고정해서 받는다. 브랜치 이름으로 받으면 미러가
+  rebase 전 커밋을 내줄 수 있다.
 - **무엇이 떠 있는지**: <https://nfa-dev.github.io/happy/build-info.json> 에 커밋 SHA, 빌드 시각,
   적용된 로컬 패치 목록이 있다.
 - **제거 조건**: #1518 이 머지되면 rebase 할 때 커밋이 자연히 사라진다(#1767 은 2026-09 에 그렇게
   빠졌다). Opus 5.5 는 upstream 이 피커에 넣는 날 사라진다. flash-list 확인 스텝은 upstream 이
-  자기 패치를 지울 때 — 즉 flash-list 가 고쳐 릴리스할 때 — 같이 지운다.
+  자기 패치를 지울 때 — 즉 flash-list 가 고쳐 릴리스할 때 — 같이 지운다. turn-end 수정도 upstream 이
+  받으면 빠진다.
 
 ## upstream PR 에서 더 나간 부분
 
