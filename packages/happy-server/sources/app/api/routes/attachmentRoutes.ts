@@ -1,20 +1,20 @@
 /**
  * Attachment upload/download routes for image attachments in chat sessions.
  *
- * Two storage modes:
- * - S3: Returns presigned PUT/GET URLs. Server never touches file bytes.
- * - Local: Server accepts/serves encrypted blobs directly.
+ * Two transfer modes (see transfersViaServer):
+ * - Through the server: it accepts/serves encrypted blobs directly and keeps
+ *   them in local storage or S3.
+ * - Direct S3 (S3_DIRECT_TRANSFERS=true): returns presigned POST/GET URLs.
+ *   Server never touches file bytes.
  *
  * No database records — attachments are identified by their ref path.
  * Cleanup happens when sessions are deleted (Phase 8).
  */
 import { z } from 'zod';
-import * as fs from 'fs';
-import * as path from 'path';
 import * as crypto from 'crypto';
 import { Fastify } from '../types';
 import { db } from '@/storage/db';
-import { s3client, s3bucket, isLocalStorage, getLocalFilesDir, putLocalFile } from '@/storage/files';
+import { s3client, s3bucket, transfersViaServer, putFile, getFile } from '@/storage/files';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const PRESIGNED_TTL_SECONDS = 15 * 60; // 15 minutes (design spec)
@@ -122,15 +122,15 @@ export function attachmentRoutes(app: Fastify) {
         const attachmentFile = `${attachmentId}.enc`;
         const ref = `sessions/${sessionId}/attachments/${attachmentFile}`;
 
-        if (isLocalStorage()) {
-            // Local mode: client uploads to our own PUT endpoint (the server
-            // enforces the size limit by inspecting the request body before
-            // it hits disk, so PUT is fine here).
+        if (transfersViaServer()) {
+            // Client uploads to our own PUT endpoint (the server enforces the
+            // size limit by inspecting the request body before it reaches
+            // storage, so PUT is fine here).
             const baseUrl = resolveBaseUrl(request);
             const uploadUrl = `${baseUrl}/v1/sessions/${sessionId}/attachments/${attachmentFile}`;
             return reply.send({ ref, uploadUrl, method: 'PUT' });
         } else {
-            // S3 mode: presigned POST policy with content-length-range so S3
+            // Direct S3 transfers: presigned POST policy with content-length-range so S3
             // itself rejects oversize uploads — a presigned PUT cannot enforce
             // size and would let a client honest about size in the auth call
             // PUT 500MB at the URL afterwards.
@@ -150,8 +150,8 @@ export function attachmentRoutes(app: Fastify) {
     });
 
     /**
-     * Local storage: accept encrypted blob upload via PUT.
-     * Only active when S3 is not configured.
+     * Accept an encrypted blob upload via PUT and store it.
+     * Not available with direct S3 transfers.
      */
     app.put('/v1/sessions/:sessionId/attachments/:attachmentFile', {
         schema: {
@@ -167,8 +167,8 @@ export function attachmentRoutes(app: Fastify) {
         },
         preHandler: app.authenticate,
     }, async (request, reply) => {
-        if (!isLocalStorage()) {
-            return reply.code(404).send({ error: 'Direct upload not available in S3 mode' });
+        if (!transfersViaServer()) {
+            return reply.code(404).send({ error: 'Direct upload not available with direct S3 transfers' });
         }
 
         const { sessionId, attachmentFile } = request.params;
@@ -193,15 +193,15 @@ export function attachmentRoutes(app: Fastify) {
         }
 
         const ref = `sessions/${sessionId}/attachments/${attachmentFile}`;
-        await putLocalFile(ref, body);
+        await putFile(ref, body);
 
         return reply.send({ ok: true });
     });
 
     /**
      * Request a download URL for an attachment by ref. The client follows the
-     * returned URL with a normal HTTP GET — in local mode it points back at
-     * this server (auth-required), in S3 mode it is a presigned GET URL.
+     * returned URL with a normal HTTP GET — it points back at this server
+     * (auth-required), or with direct S3 transfers it is a presigned GET URL.
      * Pairs with /request-upload as the design-spec endpoint.
      */
     app.post('/v1/sessions/:sessionId/attachments/request-download', {
@@ -245,7 +245,7 @@ export function attachmentRoutes(app: Fastify) {
             return reply.code(400).send({ error: 'Invalid attachment ref' });
         }
 
-        if (isLocalStorage()) {
+        if (transfersViaServer()) {
             const baseUrl = resolveBaseUrl(request);
             const downloadUrl = `${baseUrl}/v1/sessions/${sessionId}/attachments/${attachmentFile}`;
             return reply.send({ downloadUrl });
@@ -255,9 +255,9 @@ export function attachmentRoutes(app: Fastify) {
     });
 
     /**
-     * Download an attachment. Returns the encrypted blob directly (local)
-     * or a presigned GET URL redirect (S3). Backs the URL returned by
-     * /request-download in local mode; clients can also call this directly.
+     * Download an attachment. Returns the encrypted blob directly, or a
+     * presigned GET URL redirect with direct S3 transfers. Backs the URL
+     * returned by /request-download; clients can also call this directly.
      */
     app.get('/v1/sessions/:sessionId/attachments/:attachmentFile', {
         schema: {
@@ -286,15 +286,15 @@ export function attachmentRoutes(app: Fastify) {
 
         const ref = `sessions/${sessionId}/attachments/${attachmentFile}`;
 
-        if (isLocalStorage()) {
-            const fullPath = path.join(getLocalFilesDir(), ref);
-            if (!fs.existsSync(fullPath)) {
+        if (transfersViaServer()) {
+            const data = await getFile(ref);
+            if (!data) {
                 return reply.code(404).send({ error: 'Attachment not found' });
             }
             reply.header('Content-Type', 'application/octet-stream');
-            return reply.type('application/octet-stream').send(fs.readFileSync(fullPath));
+            return reply.type('application/octet-stream').send(data);
         } else {
-            // S3 mode: redirect to presigned GET URL (15 min, per design).
+            // Direct S3 transfers: redirect to presigned GET URL (15 min, per design).
             const url = await s3client.presignedGetObject(s3bucket, ref, PRESIGNED_TTL_SECONDS);
             return reply.redirect(url);
         }

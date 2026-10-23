@@ -51,6 +51,21 @@ export function isLocalStorage() {
     return useLocalStorage;
 }
 
+/**
+ * Whether clients move blob bytes (attachments, avatars) through this server:
+ * they PUT uploads to and GET downloads from our own routes, and the server
+ * talks to storage. Local storage always works this way. S3 does too unless
+ * S3_DIRECT_TRANSFERS=true, which hands clients presigned URLs instead.
+ *
+ * Direct transfers need a store that accepts browser POST policy uploads, CORS
+ * for every client origin and an https endpoint every client can reach. NCP
+ * Object Storage answers POST policy uploads with 405, and an internal endpoint
+ * is often plain http, which an https page may not call.
+ */
+export function transfersViaServer() {
+    return useLocalStorage || process.env.S3_DIRECT_TRANSFERS !== 'true';
+}
+
 export function getLocalFilesDir() {
     return localFilesDir;
 }
@@ -59,6 +74,37 @@ export async function putLocalFile(filePath: string, data: Buffer) {
     const fullPath = path.join(localFilesDir, filePath);
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
     fs.writeFileSync(fullPath, data);
+}
+
+/** Stores bytes at a storage path, in the local files directory or the S3 bucket. */
+export async function putFile(filePath: string, data: Buffer) {
+    if (useLocalStorage) {
+        await putLocalFile(filePath, data);
+        return;
+    }
+    await s3client.putObject(s3bucket, filePath, data, data.length);
+}
+
+/** The bytes stored at a storage path, or null when nothing is stored there. */
+export async function getFile(filePath: string): Promise<Buffer | null> {
+    if (useLocalStorage) {
+        try {
+            return await fs.promises.readFile(path.join(localFilesDir, filePath));
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+            throw error;
+        }
+    }
+    let stream: AsyncIterable<Buffer>;
+    try {
+        stream = await s3client.getObject(s3bucket, filePath);
+    } catch (error) {
+        if ((error as { code?: string }).code === 'NoSuchKey') return null;
+        throw error;
+    }
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    return Buffer.concat(chunks);
 }
 
 /**

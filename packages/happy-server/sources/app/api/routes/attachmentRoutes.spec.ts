@@ -15,6 +15,9 @@ const {
         sessions: [] as Array<{ id: string; accountId: string }>,
         uploads: new Map<string, Buffer>(),
         useLocalStorage: true,
+        // S3 mode only: whether blobs still travel through the server (the
+        // default) or clients get presigned URLs (S3_DIRECT_TRANSFERS=true).
+        relayS3: false,
         s3PostUrl: "https://s3.test/post-url",
         s3GetUrl: "https://s3.test/get-url",
         s3PolicyMaxLength: 0,
@@ -24,6 +27,7 @@ const {
         state.sessions = [];
         state.uploads = new Map();
         state.useLocalStorage = true;
+        state.relayS3 = false;
         state.s3PolicyMaxLength = 0;
     };
 
@@ -67,10 +71,16 @@ const {
         },
         s3bucket: "test-bucket",
         isLocalStorage: vi.fn(() => state.useLocalStorage),
+        transfersViaServer: vi.fn(() => state.useLocalStorage || state.relayS3),
         getLocalFilesDir: vi.fn(() => "/tmp/test-files"),
         putLocalFile: vi.fn(async (filePath: string, data: Buffer) => {
             state.uploads.set(filePath, data);
         }),
+        // Storage either way: local files or the bucket, keyed by ref.
+        putFile: vi.fn(async (filePath: string, data: Buffer) => {
+            state.uploads.set(filePath, data);
+        }),
+        getFile: vi.fn(async (filePath: string) => state.uploads.get(filePath) ?? null),
     };
 
     const fsMock = {
@@ -443,5 +453,76 @@ describe("attachmentRoutes — GET (download)", () => {
             headers: { "x-user-id": "u1" },
         });
         expect(res.statusCode).toBe(404);
+    });
+});
+
+describe("attachmentRoutes — S3 relayed through the server", () => {
+    let app: Fastify;
+    beforeEach(() => {
+        resetState();
+        state.useLocalStorage = false;
+        state.relayS3 = true;
+        filesMock.s3client.presignedPostPolicy.mockClear();
+        filesMock.s3client.presignedGetObject.mockClear();
+    });
+    afterEach(async () => { if (app) await app.close(); });
+
+    it("round-trips a blob through the server without presigned URLs", async () => {
+        seedSession("s1", "u1");
+        app = await createApp();
+
+        const upload = await app.inject({
+            method: "POST",
+            url: "/v1/sessions/s1/attachments/request-upload",
+            headers: { "x-user-id": "u1", host: "relay.test", "x-forwarded-proto": "https" },
+            payload: { filename: "img.jpg", size: 7 },
+        });
+        expect(upload.statusCode).toBe(200);
+        const { ref, uploadUrl, method, formFields } = upload.json();
+        expect(method).toBe("PUT");
+        expect(formFields).toBeUndefined();
+        expect(uploadUrl).toBe(`https://relay.test/v1/${ref}`);
+
+        const put = await app.inject({
+            method: "PUT",
+            url: new URL(uploadUrl).pathname,
+            headers: { "x-user-id": "u1", "content-type": "application/octet-stream" },
+            payload: Buffer.from("payload"),
+        });
+        expect(put.statusCode).toBe(200);
+        expect(state.uploads.get(ref)).toEqual(Buffer.from("payload"));
+
+        const download = await app.inject({
+            method: "POST",
+            url: "/v1/sessions/s1/attachments/request-download",
+            headers: { "x-user-id": "u1", host: "relay.test", "x-forwarded-proto": "https" },
+            payload: { ref },
+        });
+        expect(download.statusCode).toBe(200);
+        expect(download.json().downloadUrl).toBe(uploadUrl);
+
+        const get = await app.inject({
+            method: "GET",
+            url: new URL(uploadUrl).pathname,
+            headers: { "x-user-id": "u1" },
+        });
+        expect(get.statusCode).toBe(200);
+        expect(get.headers["content-type"]).toContain("application/octet-stream");
+        expect(get.rawPayload).toEqual(Buffer.from("payload"));
+        expect(filesMock.s3client.presignedPostPolicy).not.toHaveBeenCalled();
+        expect(filesMock.s3client.presignedGetObject).not.toHaveBeenCalled();
+    });
+
+    it("answers 404 for a blob that was never stored instead of redirecting", async () => {
+        seedSession("s1", "u1");
+        app = await createApp();
+
+        const res = await app.inject({
+            method: "GET",
+            url: "/v1/sessions/s1/attachments/missing.enc",
+            headers: { "x-user-id": "u1" },
+        });
+        expect(res.statusCode).toBe(404);
+        expect(res.headers.location).toBeUndefined();
     });
 });

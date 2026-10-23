@@ -16,8 +16,10 @@ import {
     s3client,
     s3bucket,
     isLocalStorage,
+    transfersViaServer,
     getLocalFilesDir,
-    putLocalFile,
+    putFile,
+    getFile,
     deleteProjectAvatars,
 } from '@/storage/files';
 import {
@@ -420,7 +422,7 @@ export function projectRoutes(app: Fastify) {
         if (!project) return reply.code(404).send({ error: 'Project not found' });
 
         const ref = `projects/${project.id}/avatar/${crypto.randomUUID()}.enc`;
-        if (isLocalStorage()) {
+        if (transfersViaServer()) {
             const baseUrl = resolveBaseUrl(request);
             return reply.send({
                 ref,
@@ -442,7 +444,7 @@ export function projectRoutes(app: Fastify) {
         preHandler: app.authenticate,
         schema: { params: projectIdParams.extend({ avatarFile: z.string() }) },
     }, async (request, reply) => {
-        if (!isLocalStorage()) return reply.code(404).send({ error: 'Direct upload not available in S3 mode' });
+        if (!transfersViaServer()) return reply.code(404).send({ error: 'Direct upload not available with direct S3 transfers' });
         const { projectId, avatarFile } = request.params;
         const project = await db.project.findFirst({ where: { id: projectId, accountId: request.userId } });
         if (!project) return reply.code(404).send({ error: 'Project not found' });
@@ -453,7 +455,7 @@ export function projectRoutes(app: Fastify) {
         if (!Buffer.isBuffer(body) || body.length > MAX_FILE_SIZE) {
             return reply.code(413).send({ error: 'File too large (max 10MB)' });
         }
-        await putLocalFile(`projects/${projectId}/avatar/${avatarFile}`, body);
+        await putFile(`projects/${projectId}/avatar/${avatarFile}`, body);
         return reply.send({ ok: true });
     });
 
@@ -468,7 +470,7 @@ export function projectRoutes(app: Fastify) {
         if (!project.avatarRef || !projectAvatarRef(project.id, project.avatarRef)) {
             return reply.code(404).send({ error: 'Project avatar not found' });
         }
-        if (isLocalStorage()) {
+        if (transfersViaServer()) {
             const baseUrl = resolveBaseUrl(request);
             return reply.send({
                 ref: project.avatarRef,
@@ -483,16 +485,18 @@ export function projectRoutes(app: Fastify) {
         preHandler: app.authenticate,
         schema: { params: projectIdParams.extend({ avatarFile: z.string() }) },
     }, async (request, reply) => {
-        if (!isLocalStorage()) return reply.code(404).send({ error: 'Direct download not available in S3 mode' });
+        if (!transfersViaServer()) return reply.code(404).send({ error: 'Direct download not available with direct S3 transfers' });
         const { projectId, avatarFile } = request.params;
         const project = await db.project.findFirst({ where: { id: projectId, accountId: request.userId } });
         if (!project) return reply.code(404).send({ error: 'Project not found' });
         const ref = `projects/${projectId}/avatar/${avatarFile}`;
         if (!projectAvatarRef(projectId, ref)) return reply.code(404).send({ error: 'Invalid project avatar file' });
         if (project.avatarRef !== ref) return reply.code(404).send({ error: 'Project avatar not found' });
-        const fullPath = localProjectAvatarPath(projectId, ref);
-        if (!fullPath) return reply.code(404).send({ error: 'Invalid project avatar file' });
-        if (!fs.existsSync(fullPath)) return reply.code(404).send({ error: 'Project avatar not found' });
-        return reply.type('application/octet-stream').send(fs.readFileSync(fullPath));
+        if (isLocalStorage() && !localProjectAvatarPath(projectId, ref)) {
+            return reply.code(404).send({ error: 'Invalid project avatar file' });
+        }
+        const data = await getFile(ref);
+        if (!data) return reply.code(404).send({ error: 'Project avatar not found' });
+        return reply.type('application/octet-stream').send(data);
     });
 }

@@ -31,6 +31,8 @@ const {
         uploads: new Map<string, Buffer>(),
         s3Objects: new Set<string>(),
         useLocalStorage: true,
+        // S3 mode only: blobs travel through the server unless direct transfers are on.
+        relayS3: false,
         nextId: 1,
     };
 
@@ -40,6 +42,7 @@ const {
         state.uploads = new Map();
         state.s3Objects = new Set();
         state.useLocalStorage = true;
+        state.relayS3 = false;
         state.nextId = 1;
     };
 
@@ -128,8 +131,15 @@ const {
         },
         s3bucket: 'test-bucket',
         isLocalStorage: vi.fn(() => state.useLocalStorage),
+        transfersViaServer: vi.fn(() => state.useLocalStorage || state.relayS3),
         getLocalFilesDir: vi.fn(() => '/tmp/project-test-files'),
         putLocalFile: vi.fn(async (filePath: string, data: Buffer) => state.uploads.set(filePath, data)),
+        // Storage either way, keyed by ref; in S3 mode statObject sees it too.
+        putFile: vi.fn(async (filePath: string, data: Buffer) => {
+            state.uploads.set(filePath, data);
+            if (!state.useLocalStorage) state.s3Objects.add(filePath);
+        }),
+        getFile: vi.fn(async (filePath: string) => state.uploads.get(filePath) ?? null),
         deleteProjectAvatars: vi.fn(async () => undefined),
     };
 
@@ -315,6 +325,35 @@ describe('projectRoutes', () => {
         const download = await app.inject({ method: 'POST', url: `/v1/projects/${projectId}/avatar/request-download`, headers: { 'x-user-id': 'u1' } });
         expect(download.statusCode).toBe(200);
         expect(download.json().downloadUrl).toBe('https://s3.test/download');
+    });
+
+    it('relays avatar bytes through the server in S3 mode unless direct transfers are on', async () => {
+        state.useLocalStorage = false;
+        state.relayS3 = true;
+        filesMock.s3client.presignedPostPolicy.mockClear();
+        filesMock.s3client.presignedGetObject.mockClear();
+        app = await createApp();
+        const created = await app.inject({ method: 'POST', url: '/v1/projects', headers: { 'x-user-id': 'u1' }, payload: { externalId: 'relay', metadata: 'one' } });
+        const projectId = created.json().id;
+        const upload = await app.inject({ method: 'POST', url: `/v1/projects/${projectId}/avatar/request-upload`, headers: { 'x-user-id': 'u1' }, payload: { size: 3 } });
+        expect(upload.statusCode).toBe(200);
+        expect(upload.json()).toMatchObject({ method: 'PUT' });
+        expect(upload.json().formFields).toBeUndefined();
+        const ref = upload.json().ref as string;
+        const file = ref.slice(ref.lastIndexOf('/') + 1);
+        const put = await app.inject({ method: 'PUT', url: `/v1/projects/${projectId}/avatar/${file}`, headers: { 'x-user-id': 'u1', 'content-type': 'application/octet-stream' }, payload: Buffer.from('abc') });
+        expect(put.statusCode).toBe(200);
+        expect(state.s3Objects.has(ref)).toBe(true);
+        const active = await app.inject({ method: 'PATCH', url: `/v1/projects/${projectId}/avatar`, headers: { 'x-user-id': 'u1' }, payload: { ref, preview: 'encrypted-preview' } });
+        expect(active.statusCode).toBe(200);
+        const download = await app.inject({ method: 'POST', url: `/v1/projects/${projectId}/avatar/request-download`, headers: { 'x-user-id': 'u1' } });
+        expect(download.statusCode).toBe(200);
+        expect(download.json().downloadUrl).toContain(`/v1/projects/${projectId}/avatar/${file}`);
+        const bytes = await app.inject({ method: 'GET', url: `/v1/projects/${projectId}/avatar/${file}`, headers: { 'x-user-id': 'u1' } });
+        expect(bytes.statusCode).toBe(200);
+        expect(bytes.rawPayload).toEqual(Buffer.from('abc'));
+        expect(filesMock.s3client.presignedPostPolicy).not.toHaveBeenCalled();
+        expect(filesMock.s3client.presignedGetObject).not.toHaveBeenCalled();
     });
 
     it('unlinks sessions and cleans avatar storage on project deletion', async () => {

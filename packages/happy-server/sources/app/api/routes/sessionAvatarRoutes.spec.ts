@@ -30,7 +30,9 @@ const fixture = vi.hoisted(() => {
     },
     account: { update: vi.fn(async () => ({ seq: session.avatarVersion })) },
   };
-  return { session, objects, emitUpdate, db, local: false, directory: "" };
+  // relay: S3 mode with bytes through the server; blobs: what that put in the bucket.
+  const blobs = new Map<string, Buffer>();
+  return { session, objects, blobs, emitUpdate, db, local: false, relay: false, directory: "" };
 });
 vi.mock("@/storage/db", () => ({ db: fixture.db }));
 vi.mock("@/storage/inTx", () => ({ inTx: async (fn: any) => fn(fixture.db) }));
@@ -49,8 +51,14 @@ vi.mock("@/app/events/eventRouter", () => ({
 }));
 vi.mock("@/storage/files", () => ({
   isLocalStorage: () => fixture.local,
+  transfersViaServer: () => fixture.local || fixture.relay,
   getLocalFilesDir: () => fixture.directory,
   putLocalFile: vi.fn(),
+  putFile: async (ref: string, bytes: Buffer) => {
+    fixture.blobs.set(ref, bytes);
+    fixture.objects.add(ref);
+  },
+  getFile: async (ref: string) => fixture.blobs.get(ref) ?? null,
   s3bucket: "test",
   s3client: {
     newPostPolicy: () => ({
@@ -77,7 +85,9 @@ describe("session avatar transport", () => {
   beforeEach(async () => {
     Object.assign(fixture.session, { avatarRef: null, avatarPreview: null, avatarVersion: 0 });
     fixture.objects.clear();
+    fixture.blobs.clear();
     fixture.local = false;
+    fixture.relay = false;
     fixture.directory = await mkdtemp(join(tmpdir(), "happy-session-avatar-"));
     vi.clearAllMocks();
     const instance = fastify();
@@ -231,5 +241,43 @@ describe("session avatar transport", () => {
     );
     await app.inject({ method: "DELETE", url: base, headers });
     expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(404);
+  });
+
+  it("relays S3 bytes through the server, supports upload retries, and rejects overwrites", async () => {
+    fixture.relay = true;
+    const upload = await app.inject({
+      method: "POST",
+      url: `${base}/request-upload`,
+      headers,
+      payload: { size: 3 },
+    });
+    const { ref, uploadUrl, method, formFields } = upload.json();
+    expect(method).toBe("PUT");
+    expect(formFields).toBeUndefined();
+    const url = new URL(uploadUrl).pathname;
+    const request = {
+      method: "PUT" as const,
+      url,
+      headers: { ...headers, "content-type": "application/octet-stream" },
+      payload: Buffer.from("abc"),
+    };
+    expect((await app.inject(request)).statusCode).toBe(200);
+    expect((await app.inject(request)).statusCode).toBe(200);
+    expect((await app.inject({ ...request, payload: Buffer.from("xyz") })).statusCode).toBe(409);
+    expect(fixture.blobs.get(ref)).toEqual(Buffer.from("abc"));
+    expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(404);
+    const active = await app.inject({
+      method: "PATCH",
+      url: base,
+      headers,
+      payload: { ref, preview: "ciphertext" },
+    });
+    expect(active.statusCode).toBe(200);
+    expect(
+      (await app.inject({ method: "POST", url: `${base}/request-download`, headers })).json(),
+    ).toEqual({ ref, downloadUrl: uploadUrl });
+    const bytes = await app.inject({ method: "GET", url, headers });
+    expect(bytes.statusCode).toBe(200);
+    expect(bytes.rawPayload).toEqual(Buffer.from("abc"));
   });
 });

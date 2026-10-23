@@ -6,7 +6,15 @@ import { randomUUID } from "node:crypto";
 import type { Fastify } from "../types";
 import { db } from "@/storage/db";
 import { inTx } from "@/storage/inTx";
-import { s3client, s3bucket, isLocalStorage, getLocalFilesDir } from "@/storage/files";
+import {
+  s3client,
+  s3bucket,
+  isLocalStorage,
+  transfersViaServer,
+  getLocalFilesDir,
+  putFile,
+  getFile,
+} from "@/storage/files";
 import { eventRouter, buildUpdateSessionUpdate } from "@/app/events/eventRouter";
 import { sessionAvatar } from "@/app/session/sessionAvatar";
 import { randomKeyNaked } from "@/utils/randomKeyNaked";
@@ -125,7 +133,7 @@ export function sessionAvatarRoutes(app: Fastify) {
       limits.set(request.userId, limit);
       const file = `${randomUUID()}.enc`;
       const ref = `sessions/${session.id}/avatar/${file}`;
-      if (isLocalStorage())
+      if (transfersViaServer())
         return reply.send({
           ref,
           method: "PUT",
@@ -154,7 +162,7 @@ export function sessionAvatarRoutes(app: Fastify) {
       schema: { params: fileParams },
     },
     async (request, reply) => {
-      if (!isLocalStorage()) return reply.code(404).send({ error: "Direct upload is unavailable" });
+      if (!transfersViaServer()) return reply.code(404).send({ error: "Direct upload is unavailable" });
       const { sessionId, avatarFile } = request.params;
       if (!(await owned(sessionId, request.userId)))
         return reply.code(404).send({ error: "Session not found" });
@@ -163,6 +171,16 @@ export function sessionAvatarRoutes(app: Fastify) {
         return reply
           .code(413)
           .send({ error: "Avatar must contain at most 10 MB of encrypted image data" });
+      if (!isLocalStorage()) {
+        // S3 offers no create-only write here. Refs are fresh UUIDs per upload grant,
+        // so only a retry of the same upload finds bytes already stored.
+        const ref = `sessions/${sessionId}/avatar/${avatarFile}`;
+        const stored = await getFile(ref);
+        if (stored && !stored.equals(bytes))
+          return reply.code(409).send({ error: "Avatar upload already exists" });
+        if (!stored) await putFile(ref, bytes);
+        return reply.send({ ok: true });
+      }
       const target = path.join(getLocalFilesDir(), "sessions", sessionId, "avatar", avatarFile);
       await fs.mkdir(path.dirname(target), { recursive: true });
       // Activated references are immutable; replacing a picture always uses a fresh upload.
@@ -228,7 +246,7 @@ export function sessionAvatarRoutes(app: Fastify) {
       if (!session?.avatarRef || !validRef(session.id, session.avatarRef))
         return reply.code(404).send({ error: "Session avatar not found" });
       const ref = session.avatarRef;
-      const downloadUrl = isLocalStorage()
+      const downloadUrl = transfersViaServer()
         ? `${baseUrl(request)}/v1/sessions/${session.id}/avatar/${path.basename(ref)}`
         : await s3client.presignedGetObject(s3bucket, ref, 15 * 60);
       return reply.send({ ref, downloadUrl });
@@ -242,17 +260,21 @@ export function sessionAvatarRoutes(app: Fastify) {
       schema: { params: fileParams },
     },
     async (request, reply) => {
-      if (!isLocalStorage())
+      if (!transfersViaServer())
         return reply.code(404).send({ error: "Direct download is unavailable" });
       const session = await owned(request.params.sessionId, request.userId);
       const ref = `sessions/${request.params.sessionId}/avatar/${request.params.avatarFile}`;
       if (!session || session.avatarRef !== ref)
         return reply.code(404).send({ error: "Session avatar not found" });
       try {
+        const bytes = isLocalStorage()
+          ? await fs.readFile(path.join(getLocalFilesDir(), ref))
+          : await getFile(ref);
+        if (!bytes) return reply.code(404).send({ error: "Session avatar not found" });
         return reply
           .header("Cache-Control", "private, no-store")
           .type("application/octet-stream")
-          .send(await fs.readFile(path.join(getLocalFilesDir(), ref)));
+          .send(bytes);
       } catch {
         return reply.code(404).send({ error: "Session avatar not found" });
       }
