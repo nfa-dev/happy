@@ -95,17 +95,32 @@ FlashList 수정은 `node_modules` 를 고치는 것이라 소스 커밋이 안 
 사내 호스트명을 남기지 않으려는 것이고, 각자 앱 안 `/server` 화면에서 자기 서버를 넣으면 된다
 (MMKV 에 저장되어 로그아웃해도 유지). 베이크가 필요하면 workflow_dispatch 의 `server_url` 입력을 쓴다.
 
+## 브랜치
+
+개발은 `pages` 하나에서 한다. 웹·CLI·agent·서버를 모두 여기서 고치는데, push 하는 순간 웹이 배포되고
+서버 이미지와 CLI 게시도 이 브랜치에서 나간다. 그래서 작업은 짧은 `fix/…`·`feat/…` 브랜치에서 하고,
+검증이 끝나면 `pages` 로 fast-forward 한다. 기능 하나에 커밋 하나라는 원칙은 그대로다.
+
+CLI·agent 를 게시하면 그 커밋에서 `<CLI 버전>-navercorp` 브랜치를 딴다(예: `1.2.6-navercorp`). 게시한 버전과
+브랜치가 1:1 로 남으니 `pages` 를 rebase 해도 그 버전의 소스가 사라지지 않는다. 버전 브랜치는 동결해 두고,
+그 버전에 급한 수정이 필요할 때만 거기에 커밋해 같은 버전 번호로 다시 게시한다. 같은 수정은 `pages` 에도
+넣는다. agent 는 CLI 와 같은 커밋에서 게시하고 브랜치 이름도 CLI 버전을 따른다.
+
+upstream 은 `main` 끝이 아니라 최신 `cli-*` 릴리스 태그 위로 rebase 한다. 그러면 `pages` 의 CLI 는 늘 릴리스된
+upstream 위의 사내 변경이라 언제 잘라도 게시할 수 있다. 웹·서버에 upstream `main` 의 수정이 급하면 그때만
+`main` 위로 올리고, 그 상태로는 CLI 를 게시하지 않는다.
+
 ## 운영
 
 - **재배포**: Actions → "Deploy web to Pages" → Run workflow. `pages` 브랜치에 push 해도 돈다.
   CLI·서버만 바뀐 push 도 웹을 다시 배포하지만 결과물은 같다.
-- **업스트림 따라가기**: `git fetch upstream && git rebase upstream/main` → push (force). 패치가 안
-  붙으면 빌드가 죽으니 조용히 어긋날 일은 없다.
+- **업스트림 따라가기**: 먼저 지금 tip 을 `pages-YYYYMMDD` 태그로 push 해 둔다. rebase 하면 SHA 가 바뀌는데,
+  빌드에 고정해 둔 커밋이 태그로 남아야 다시 빌드하거나 추적할 수 있다. 그다음 `git fetch upstream --tags &&
+  git rebase cli-<최신 릴리스>` → `git push --force-with-lease`. upstream 버전이 바뀌면 fork 버전 커밋의
+  `package.json` 충돌을 `<새 버전>-navercorp` 로 푼다. 패치가 안 붙으면 빌드가 죽으니 조용히 어긋날 일은 없다.
 - **CLI·agent 게시**: 각 패키지에서 `NEXUS_BASE_URL=<Nexus 주소> pnpm run publish:nexus`. 배포 계정은
-  `NEXUS_NPM_AUTH` 나 `~/.npmrc` 의 `_auth` 줄로 준다. 같은 버전 번호로 다시 게시하므로 설치본이 어느
-  빌드인지는 `dist/build-info.json` 의 커밋으로 본다. 이 브랜치는 upstream 의 릴리스 태그가 아니라
-  `main` 을 따라가니, rebase 뒤 게시하기 전에 `git log cli-<마지막 릴리스>..upstream/main --
-  packages/happy-cli` 로 아직 릴리스되지 않은 upstream CLI 변경이 딸려 오는지 확인한다.
+  `NEXUS_NPM_AUTH` 나 `~/.npmrc` 의 `_auth` 줄로 준다. 게시한 뒤 그 커밋에서 버전 브랜치를 따서 push 한다.
+  같은 버전 번호로 다시 게시하기도 하므로 설치본이 어느 빌드인지는 `dist/build-info.json` 의 커밋으로 본다.
 - **서버**: relay 이미지는 이 브랜치의 커밋을 SHA 로 고정해서 받는다. 브랜치 이름으로 받으면 미러가
   rebase 전 커밋을 내줄 수 있다.
 - **무엇이 떠 있는지**: <https://nfa-dev.github.io/happy/build-info.json> 에 커밋 SHA, 빌드 시각,
