@@ -102,6 +102,18 @@ export function defaultClaudeConfigDir(): string {
 }
 
 /**
+ * Where the machine-default login keeps its .claude.json. With no
+ * CLAUDE_CONFIG_DIR claude stores it at ~/.claude.json (home root, NOT inside
+ * ~/.claude); with a user-provided config dir it lives inside that dir.
+ */
+export function machineDefaultClaudeJsonPath(): string {
+  if (initialEnvConfigDir) {
+    return join(expandHome(initialEnvConfigDir), '.claude.json');
+  }
+  return join(homedir(), '.claude.json');
+}
+
+/**
  * Point CLAUDE_CONFIG_DIR at the given account. Switching back to the default
  * account restores the session-start value (a genuinely user-provided
  * CLAUDE_CONFIG_DIR is honored; a leaked or happy-set one is removed).
@@ -246,15 +258,16 @@ export function accountConfigDir(account: ClaudeAccount): string | null {
  * touches the OS keychain. A macOS keychain-only login leaves no
  * .credentials.json, but claude records the account in .claude.json's
  * oauthAccount at login time (our onboarding seed does not), so that field
- * is the fallback signal.
+ * is the fallback signal. The machine default's .claude.json is usually not
+ * inside its config dir (machineDefaultClaudeJsonPath).
  */
 export function hasClaudeCredentials(account: ClaudeAccount): boolean {
-  const dir = accountConfigDir(account) ?? defaultClaudeConfigDir();
-  if (existsSync(join(dir, '.credentials.json'))) {
+  const dir = accountConfigDir(account);
+  if (existsSync(join(dir ?? defaultClaudeConfigDir(), '.credentials.json'))) {
     return true;
   }
   try {
-    const claudeJson = JSON.parse(readFileSync(join(dir, '.claude.json'), 'utf8'));
+    const claudeJson = JSON.parse(readFileSync(dir ? join(dir, '.claude.json') : machineDefaultClaudeJsonPath(), 'utf8'));
     return claudeJson.oauthAccount != null;
   } catch {
     return false;

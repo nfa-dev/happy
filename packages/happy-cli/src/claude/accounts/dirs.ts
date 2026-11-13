@@ -17,7 +17,6 @@
  */
 
 import { dirname, join, resolve } from 'node:path';
-import { homedir } from 'node:os';
 import {
   existsSync,
   lstatSync,
@@ -38,6 +37,7 @@ import {
   defaultClaudeConfigDir,
   expandHome,
   isHappyManagedConfigDir,
+  machineDefaultClaudeJsonPath,
   sharedProjectsDir,
 } from './registry';
 import type { ClaudeAccount } from './types';
@@ -117,16 +117,6 @@ export function ensureAccountDir(configDir: string): void {
   } catch (e) {
     logger.debug(`[accounts] User config sync into ${configDir} failed (continuing)`, e);
   }
-}
-
-/**
- * Where the machine-default login keeps its .claude.json. With no
- * CLAUDE_CONFIG_DIR claude stores it at ~/.claude.json (home root, NOT inside
- * ~/.claude); with a user-provided config dir it lives inside that dir.
- */
-function machineDefaultClaudeJsonPath(): string {
-  const dir = defaultClaudeConfigDir();
-  return dir === join(homedir(), '.claude') ? join(homedir(), '.claude.json') : join(dir, '.claude.json');
 }
 
 /**
