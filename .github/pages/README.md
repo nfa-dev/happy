@@ -121,6 +121,10 @@ upstream 위의 사내 변경이라 언제 잘라도 게시할 수 있다. 웹·
 - **CLI·agent 게시**: 각 패키지에서 `NEXUS_BASE_URL=<Nexus 주소> pnpm run publish:nexus`. 배포 계정은
   `NEXUS_NPM_AUTH` 나 `~/.npmrc` 의 `_auth` 줄로 준다. 게시한 뒤 그 커밋에서 버전 브랜치를 따서 push 한다.
   같은 버전 번호로 다시 게시하기도 하므로 설치본이 어느 빌드인지는 `dist/build-info.json` 의 커밋으로 본다.
+  npm-group 은 npm-snapshot 과 npm-release 에 같은 버전이 있으면 snapshot 쪽을 내준다. 이 때문에 release 게시는
+  그 버전의 snapshot 사본을 지우고 snapshot 게시는 release 에 이미 있는 버전을 받지 않는다. 마지막에는 npm-group 이
+  방금 올린 tarball 을 내주는지 확인해서 다른 사본이 나오면 실패로 끝낸다. snapshot 사본을 지울 때는 `~/.npmrc` 에
+  npm-snapshot 의 `_auth` 줄도 필요하다(`NEXUS_NPM_AUTH` 는 두 저장소에 함께 쓰인다).
 - **서버**: relay 이미지는 이 브랜치의 커밋을 SHA 로 고정해서 받는다. 브랜치 이름으로 받으면 미러가
   rebase 전 커밋을 내줄 수 있다.
 - **무엇이 떠 있는지**: <https://nfa-dev.github.io/happy/build-info.json> 에 커밋 SHA, 빌드 시각,

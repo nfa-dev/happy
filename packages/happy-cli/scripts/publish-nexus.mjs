@@ -14,8 +14,14 @@
  *
  *   npm i -g happy@<version> --registry http://<nexus>/repository/npm-group/
  *
+ * When npm-snapshot and npm-release both hold a version, npm-group hands out
+ * the npm-snapshot copy, so a leftover snapshot hides a fresh release from
+ * every install. A release publish therefore deletes the npm-snapshot copy of
+ * its version, a snapshot publish refuses a version npm-release already has,
+ * and both end by checking that npm-group serves the tarball just published.
+ *
  * NEXUS_BASE_URL is required: the Nexus base URL, e.g. http://nexus.example.com.
- * NEXUS_REPO overrides the target repository.
+ * NEXUS_REPO overrides the target repository; npm-group is then left unchecked.
  *
  * Usage:
  *   pnpm run publish:nexus              # build + pack + delete + publish (npm-release)
@@ -25,10 +31,12 @@
  *
  * Auth (deploy only — installs are anonymous):
  *   1. NEXUS_NPM_AUTH env var as "user:password", or
- *   2. an `//<host>/repository/<target repo>/:_auth=<base64>` line in ~/.npmrc
+ *   2. an `//<host>/repository/<repo>/:_auth=<base64>` line in ~/.npmrc for the
+ *      target repo, and for npm-snapshot when a release deletes a copy there
  */
 
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -39,10 +47,15 @@ if (!NEXUS_BASE) {
   console.error('✗ NEXUS_BASE_URL is not set — the Nexus base URL, e.g. http://nexus.example.com');
   process.exit(1);
 }
+const RELEASE_REPO = 'npm-release';
+const SNAPSHOT_REPO = 'npm-snapshot';
+const GROUP_REPO = 'npm-group';
 const useSnapshot = process.argv.includes('--snapshot');
-const TARGET_REPO = process.env.NEXUS_REPO || (useSnapshot ? 'npm-snapshot' : 'npm-release');
+const TARGET_REPO = process.env.NEXUS_REPO || (useSnapshot ? SNAPSHOT_REPO : RELEASE_REPO);
 const TARGET_URL = `${NEXUS_BASE}/repository/${TARGET_REPO}/`;
-const GROUP_URL = `${NEXUS_BASE}/repository/npm-group/`;
+const GROUP_URL = `${NEXUS_BASE}/repository/${GROUP_REPO}/`;
+// A NEXUS_REPO override need not be a member of npm-group
+const checksGroup = TARGET_REPO === RELEASE_REPO || TARGET_REPO === SNAPSHOT_REPO;
 
 const cliDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const wireDir = resolve(cliDir, '..', 'happy-wire');
@@ -61,24 +74,57 @@ function run(command, args, cwd) {
   }
 }
 
-function resolveAuthBase64() {
+function resolveAuthBase64(repo) {
   if (process.env.NEXUS_NPM_AUTH) {
     return Buffer.from(process.env.NEXUS_NPM_AUTH).toString('base64');
   }
   const npmrcPath = join(homedir(), '.npmrc');
   if (existsSync(npmrcPath)) {
     const host = NEXUS_BASE.replace(/^https?:\/\//, '');
-    const needle = `//${host}/repository/${TARGET_REPO}/:_auth=`;
+    const needle = `//${host}/repository/${repo}/:_auth=`;
     for (const line of readFileSync(npmrcPath, 'utf8').split(/\r?\n/)) {
       if (line.startsWith(needle)) {
         return line.slice(needle.length).trim();
       }
     }
   }
-  console.error('✗ No Nexus deploy credentials.');
+  console.error(`✗ No Nexus deploy credentials for ${repo}.`);
   console.error('  Set NEXUS_NPM_AUTH="user:password" or add to ~/.npmrc:');
-  console.error(`  //${NEXUS_BASE.replace(/^https?:\/\//, '')}/repository/${TARGET_REPO}/:_auth=<base64 of user:password>`);
+  console.error(`  //${NEXUS_BASE.replace(/^https?:\/\//, '')}/repository/${repo}/:_auth=<base64 of user:password>`);
   process.exit(1);
+}
+
+/**
+ * fetch, retried when the connection drops. pack and publish run through
+ * spawnSync, which blocks the event loop meanwhile, so the next request can go
+ * out on a keep-alive socket the server has closed by then (ECONNRESET).
+ */
+async function nexusFetch(url, init) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fetch(url, init);
+    } catch (error) {
+      if (attempt === 3) throw error;
+    }
+  }
+}
+
+/**
+ * dist.shasum (sha1) of the version in a repository's package metadata, or
+ * null when the repository does not hold that version. Read anonymously, the
+ * way installs read it.
+ */
+async function servedShasum(repo, packageName, version) {
+  const response = await nexusFetch(`${NEXUS_BASE}/repository/${repo}/${packageName.replace('/', '%2f')}`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    console.error(`✗ Reading ${packageName} from ${repo} failed: HTTP ${response.status}`);
+    process.exit(1);
+  }
+  const packument = await response.json();
+  return packument.versions?.[version]?.dist?.shasum ?? null;
 }
 
 /**
@@ -87,16 +133,16 @@ function resolveAuthBase64() {
  * line (e.g. happy@1.2.2-navercorp) must keep resolving after a newer one is
  * published. Nexus stores scoped packages as { group: "slopus", name: "happy-wire" }.
  */
-async function deleteComponent(authBase64, packageName, version) {
+async function deleteComponent(repo, authBase64, packageName, version) {
   const match = packageName.match(/^(?:@([^/]+)\/)?(.+)$/);
   const [, scope = '', name] = match;
   const headers = { Authorization: `Basic ${authBase64}` };
   let continuationToken = null;
   do {
     const url = new URL(`${NEXUS_BASE}/service/rest/v1/components`);
-    url.searchParams.set('repository', TARGET_REPO);
+    url.searchParams.set('repository', repo);
     if (continuationToken) url.searchParams.set('continuationToken', continuationToken);
-    const response = await fetch(url, { headers });
+    const response = await nexusFetch(url, { headers });
     if (!response.ok) {
       console.error(`✗ Nexus component listing failed: HTTP ${response.status}`);
       process.exit(1);
@@ -104,14 +150,15 @@ async function deleteComponent(authBase64, packageName, version) {
     const page = await response.json();
     for (const item of page.items) {
       if (item.name === name && (item.group || '') === scope && item.version === version) {
-        const del = await fetch(`${NEXUS_BASE}/service/rest/v1/components/${item.id}`, { method: 'DELETE', headers });
-        console.log(`  deleted ${packageName}@${item.version} from ${TARGET_REPO} (HTTP ${del.status})`);
+        const del = await nexusFetch(`${NEXUS_BASE}/service/rest/v1/components/${item.id}`, { method: 'DELETE', headers });
+        console.log(`  deleted ${packageName}@${item.version} from ${repo} (HTTP ${del.status})`);
       }
     }
     continuationToken = page.continuationToken;
   } while (continuationToken);
 }
 
+/** Pack and publish to the target repo; returns the tarball's sha1 (npm's dist.shasum) */
 function packAndPublish(packageDir, authBase64) {
   const pkg = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8'));
   const stageDir = mkdtempSync(join(tmpdir(), 'nexus-publish-'));
@@ -125,6 +172,7 @@ function packAndPublish(packageDir, authBase64) {
       console.error(`✗ Expected tarball not found: ${tarballPath}`);
       process.exit(1);
     }
+    const shasum = createHash('sha1').update(readFileSync(tarballPath)).digest('hex');
 
     const host = NEXUS_BASE.replace(/^https?:\/\//, '');
     const npmrcPath = join(stageDir, '.npmrc');
@@ -140,30 +188,71 @@ function packAndPublish(packageDir, authBase64) {
       '--registry', TARGET_URL,
       '--userconfig', npmrcPath,
     ], packageDir);
+    return shasum;
   } finally {
     rmSync(stageDir, { recursive: true, force: true });
   }
 }
 
-const authBase64 = resolveAuthBase64();
+/**
+ * Installs resolve through npm-group, so a publish has only landed once
+ * npm-group hands out this tarball. Allow it a few seconds to merge.
+ */
+async function verifyGroupServes(packageName, version, shasum) {
+  let served = null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    served = await servedShasum(GROUP_REPO, packageName, version);
+    if (served === shasum) {
+      console.log(`  ${GROUP_REPO} serves ${packageName}@${version} (${shasum})`);
+      return;
+    }
+    await new Promise((done) => setTimeout(done, 2000));
+  }
+  console.error(`✗ ${GROUP_REPO} serves ${packageName}@${version} as ${served ?? 'nothing'}, not the tarball just published (${shasum}).`);
+  console.error('  Installs keep getting that copy until the member of npm-group that holds it is cleaned up.');
+  process.exit(1);
+}
+
+function packageAt(dir) {
+  const { name, version } = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+  return { dir, name, version };
+}
+
+const cliPkg = packageAt(cliDir);
+const packages = withWire ? [packageAt(wireDir), cliPkg] : [cliPkg];
+const authBase64 = resolveAuthBase64(TARGET_REPO);
+
+// Settle what npm-group will hand out before anything is deleted (see the header)
+const staleSnapshots = [];
+for (const pkg of packages) {
+  if (TARGET_REPO === SNAPSHOT_REPO && await servedShasum(RELEASE_REPO, pkg.name, pkg.version)) {
+    console.error(`✗ ${pkg.name}@${pkg.version} is already in ${RELEASE_REPO}, and ${GROUP_REPO} would hand out this snapshot to every install instead.`);
+    console.error('  Publish the snapshot under another version.');
+    process.exit(1);
+  }
+  if (TARGET_REPO === RELEASE_REPO && await servedShasum(SNAPSHOT_REPO, pkg.name, pkg.version)) {
+    staleSnapshots.push(pkg);
+  }
+}
+const snapshotAuthBase64 = staleSnapshots.length > 0 ? resolveAuthBase64(SNAPSHOT_REPO) : null;
 
 if (!skipBuild) {
   console.log('─── build ───');
-  if (withWire) {
-    run('corepack', ['pnpm', 'run', 'build'], wireDir);
+  for (const pkg of packages) {
+    run('corepack', ['pnpm', 'run', 'build'], pkg.dir);
   }
-  run('corepack', ['pnpm', 'run', 'build'], cliDir);
 }
 
-if (withWire) {
-  const wirePkg = JSON.parse(readFileSync(join(wireDir, 'package.json'), 'utf8'));
-  await deleteComponent(authBase64, wirePkg.name, wirePkg.version);
-  packAndPublish(wireDir, authBase64);
+for (const pkg of packages) {
+  await deleteComponent(TARGET_REPO, authBase64, pkg.name, pkg.version);
+  const shasum = packAndPublish(pkg.dir, authBase64);
+  if (staleSnapshots.includes(pkg)) {
+    await deleteComponent(SNAPSHOT_REPO, snapshotAuthBase64, pkg.name, pkg.version);
+  }
+  if (checksGroup) {
+    await verifyGroupServes(pkg.name, pkg.version, shasum);
+  }
 }
-
-const cliPkg = JSON.parse(readFileSync(join(cliDir, 'package.json'), 'utf8'));
-await deleteComponent(authBase64, cliPkg.name, cliPkg.version);
-packAndPublish(cliDir, authBase64);
 
 console.log(`\n✓ Published. Install with:`);
 console.log(`  npm i -g ${cliPkg.name}@${cliPkg.version} --registry ${GROUP_URL}`);
