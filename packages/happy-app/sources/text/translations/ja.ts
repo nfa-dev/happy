@@ -565,6 +565,9 @@ export const ja: TranslationStructure = {
         bots: 'ボット',
         showAllWorkspaces: ({ count }: { count: number }) => `${count}件のワークスペースをすべて表示`,
         showFewerWorkspaces: '表示を減らす',
+        searchPlaceholder: 'セッションを検索',
+        searchClear: '検索をクリア',
+        searchNoResults: ({ query }: { query: string }) => `「${query}」に一致するセッションはありません`,
     },
 
     zen: {

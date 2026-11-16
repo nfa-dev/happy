@@ -12,6 +12,8 @@ import { FlatSessionRow, flatListBackgroundColor } from './FlatSessionRow';
 import { buildFlatSessionRows, toFlatSessionRow, type FlatSessionRowData } from '@/utils/flatSessionList';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useHasArchivedSessions, useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
+import { useIsSessionListSearching, useSearchedSessionListViewData } from '@/hooks/useSessionListSearch';
+import { SessionSearchField, SessionSearchNoResults } from './SessionSearchField';
 import { Typography } from '@/constants/Typography';
 import { StatusDot } from './StatusDot';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
@@ -270,6 +272,11 @@ const stylesheet = StyleSheet.create((theme) => ({
     phoneUpdateBannerHeader: {
         paddingTop: 4,
     },
+    searchField: {
+        marginHorizontal: 16,
+        marginTop: 8,
+        marginBottom: 8,
+    },
 }));
 
 const MachineHeader = React.memo(({ machineId, machineName }: {
@@ -314,15 +321,20 @@ export function SessionsList({
     scrollIndicatorTopInset = 0,
     bottomContentInset = 128,
     onScroll,
+    searchField = false,
 }: {
     topContentInset?: number;
     scrollIndicatorTopInset?: number;
     bottomContentInset?: number;
     onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+    /** Puts the session search field at the top of the list (phone layout; the sidebar has its own). */
+    searchField?: boolean;
 } = {}) {
     const styles = stylesheet;
     const safeArea = useSafeAreaInsets();
-    const sourceData = useVisibleSessionListViewData();
+    const visibleData = useVisibleSessionListViewData();
+    const sourceData = useSearchedSessionListViewData();
+    const searching = useIsSessionListSearching();
     const hasArchivedSessions = useHasArchivedSessions();
     // Stored under its original `hideInactiveSessions` key — synced settings
     // have no rename migration — but it hides archived sessions only.
@@ -346,10 +358,10 @@ export function SessionsList({
 
     // Request review
     React.useEffect(() => {
-        if (sourceData && sourceData.length > 0) {
+        if (visibleData && visibleData.length > 0) {
             requestReview();
         }
-    }, [sourceData && sourceData.length > 0]);
+    }, [visibleData && visibleData.length > 0]);
 
     const data = React.useMemo<SessionListDisplayItem[] | null>(() => {
         if (!sourceData) return sourceData;
@@ -363,7 +375,9 @@ export function SessionsList({
         const groupedRows = sourceData.filter((item) => (
             item.type !== 'header' && item.type !== 'session'
         ));
-        const archiveToggle: SessionListDisplayItem[] = hasArchivedSessions
+        // A search brings archived matches in on its own, so the toggle that
+        // would reveal them sits out while it runs.
+        const archiveToggle: SessionListDisplayItem[] = hasArchivedSessions && !searching
             ? [{ type: 'archive-toggle', hidden: hideArchivedSessions }]
             : [];
 
@@ -418,7 +432,7 @@ export function SessionsList({
             item.type !== 'project' && item.type !== 'projects-header'
         ));
         return [...legacyItems, ...hierarchy, ...archiveToggle, ...archivedRows];
-    }, [flatSessionList, hasArchivedSessions, hideArchivedSessions, machines, sourceData]);
+    }, [flatSessionList, hasArchivedSessions, hideArchivedSessions, machines, searching, sourceData]);
 
     // Early return if no data yet
     if (!data) {
@@ -573,12 +587,15 @@ export function SessionsList({
     const HeaderComponent = React.useCallback(() => {
         const isPhoneLayout = topContentInset > 0;
         return (
-            <HomeListHeader
-                style={isPhoneLayout ? styles.phoneUpdateBanner : undefined}
-                headerStyle={isPhoneLayout ? styles.phoneUpdateBannerHeader : undefined}
-            />
+            <>
+                {searchField && <SessionSearchField style={styles.searchField} />}
+                <HomeListHeader
+                    style={isPhoneLayout ? styles.phoneUpdateBanner : undefined}
+                    headerStyle={isPhoneLayout ? styles.phoneUpdateBannerHeader : undefined}
+                />
+            </>
         );
-    }, [styles.phoneUpdateBanner, styles.phoneUpdateBannerHeader, topContentInset]);
+    }, [searchField, styles.phoneUpdateBanner, styles.phoneUpdateBannerHeader, styles.searchField, topContentInset]);
 
     // Footer removed - all sessions now shown inline
 
@@ -596,6 +613,7 @@ export function SessionsList({
                         maxWidth: layout.maxWidth,
                     }}
                     ListHeaderComponent={HeaderComponent}
+                    ListEmptyComponent={searching ? SessionSearchNoResults : undefined}
                     automaticallyAdjustsScrollIndicatorInsets={scrollIndicatorTopInset === 0}
                     scrollIndicatorInsets={scrollIndicatorTopInset > 0
                         ? { top: scrollIndicatorTopInset }

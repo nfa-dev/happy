@@ -565,6 +565,9 @@ export const zhHans: TranslationStructure = {
         bots: '机器人',
         showAllWorkspaces: ({ count }: { count: number }) => `显示全部 ${count} 个工作区`,
         showFewerWorkspaces: '收起',
+        searchPlaceholder: '搜索会话',
+        searchClear: '清除搜索',
+        searchNoResults: ({ query }: { query: string }) => `没有与“${query}”匹配的会话`,
     },
 
     zen: {

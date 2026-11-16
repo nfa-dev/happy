@@ -563,6 +563,9 @@ export const pt: TranslationStructure = {
         bots: 'Bots',
         showAllWorkspaces: ({ count }: { count: number }) => `Mostrar todos os ${count} espaços de trabalho`,
         showFewerWorkspaces: 'Mostrar menos',
+        searchPlaceholder: 'Pesquisar sessões',
+        searchClear: 'Limpar pesquisa',
+        searchNoResults: ({ query }: { query: string }) => `Nenhuma sessão corresponde a “${query}”`,
     },
 
     zen: {

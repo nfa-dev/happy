@@ -580,6 +580,9 @@ export const pl: TranslationStructure = {
         bots: 'Boty',
         showAllWorkspaces: ({ count }: { count: number }) => `Pokaż wszystkie przestrzenie (${count})`,
         showFewerWorkspaces: 'Pokaż mniej',
+        searchPlaceholder: 'Szukaj sesji',
+        searchClear: 'Wyczyść wyszukiwanie',
+        searchNoResults: ({ query }: { query: string }) => `Brak sesji pasujących do „${query}”`,
     },
 
     zen: {

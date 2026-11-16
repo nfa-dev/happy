@@ -564,6 +564,9 @@ export const es: TranslationStructure = {
         bots: 'Bots',
         showAllWorkspaces: ({ count }: { count: number }) => `Mostrar los ${count} espacios de trabajo`,
         showFewerWorkspaces: 'Mostrar menos',
+        searchPlaceholder: 'Buscar sesiones',
+        searchClear: 'Borrar búsqueda',
+        searchNoResults: ({ query }: { query: string }) => `Ninguna sesión coincide con «${query}»`,
     },
 
     zen: {

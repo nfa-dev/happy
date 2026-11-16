@@ -34,7 +34,8 @@ import {
     useSettingMutable,
     type SessionRowData,
 } from '@/sync/storage';
-import { useHasArchivedSessions, useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
+import { useHasArchivedSessions } from '@/hooks/useVisibleSessionListViewData';
+import { useIsSessionListSearching, useSearchedSessionListViewData } from '@/hooks/useSessionListSearch';
 import {
     buildProjectHomeRows,
     workspaceOrigin,
@@ -54,6 +55,7 @@ import { Avatar } from './Avatar';
 import { StatusDot } from './StatusDot';
 import { ShimmerText } from './ShimmerText';
 import { HomeListHeader } from './HomeListHeader';
+import { SessionSearchField, SessionSearchNoResults } from './SessionSearchField';
 import { layout } from './layout';
 
 // Every row starts with the same avatar and name columns. Disclosure controls
@@ -97,6 +99,8 @@ export interface ProjectHomeListLayout {
     scrollIndicatorTopInset?: number;
     bottomContentInset?: number;
     onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+    /** Puts the session search field at the top of the list (phone layout). */
+    searchField?: boolean;
 }
 
 /**
@@ -114,7 +118,8 @@ export interface ProjectHomeListLayout {
  * the same archive that the flat home list shows.
  */
 export const ProjectHomeList = React.memo((props: ProjectHomeListLayout) => {
-    const data = useVisibleSessionListViewData();
+    const data = useSearchedSessionListViewData();
+    const searching = useIsSessionListSearching();
     const machines = useAllMachines();
     const expanded = useLocalSetting('expandedProjects');
     const hasArchivedSessions = useHasArchivedSessions();
@@ -122,15 +127,28 @@ export const ProjectHomeList = React.memo((props: ProjectHomeListLayout) => {
     // have no rename migration — but it hides archived sessions only.
     const [archiveHidden, setArchiveHidden] = useSettingMutable('hideInactiveSessions');
 
+    // A search shows every matching worktree rather than leaving some folded
+    // away inside their card.
+    const rowsExpanded = React.useMemo(() => {
+        if (!searching || !data) return expanded;
+        const all: Record<string, boolean> = {};
+        for (const item of data) {
+            if (item.type === 'project') all[item.project.id] = true;
+        }
+        return all;
+    }, [data, expanded, searching]);
+
     const rows = React.useMemo(() => buildProjectHomeRows({
         data: data ?? [],
         machines,
         unknownMachineText: t('status.unknown'),
-        expanded,
+        expanded: rowsExpanded,
         labels: { bots: t('sidebar.bots'), projects: t('sidebar.projects') },
-        hasArchivedSessions,
+        // The search already brings archived matches in, so the toggle that
+        // would reveal them has nothing to do while it runs.
+        hasArchivedSessions: hasArchivedSessions && !searching,
         archiveHidden,
-    }), [archiveHidden, expanded, data, hasArchivedSessions, machines]);
+    }), [archiveHidden, rowsExpanded, data, hasArchivedSessions, machines, searching]);
 
     const toggleArchive = React.useCallback(() => {
         setArchiveHidden(!archiveHidden);
@@ -158,7 +176,15 @@ export const ProjectHomeList = React.memo((props: ProjectHomeListLayout) => {
         });
     }, []);
 
-    return <ProjectHomeListView rows={rows} onToggle={toggle} onToggleArchive={toggleArchive} {...props} />;
+    return (
+        <ProjectHomeListView
+            rows={rows}
+            onToggle={toggle}
+            onToggleArchive={toggleArchive}
+            showNoResults={searching}
+            {...props}
+        />
+    );
 });
 
 /**
@@ -169,14 +195,18 @@ export const ProjectHomeListView = React.memo(({
     rows,
     onToggle,
     onToggleArchive,
+    showNoResults = false,
     topContentInset = 0,
     scrollIndicatorTopInset = 0,
     bottomContentInset = 128,
     onScroll,
+    searchField = false,
 }: ProjectHomeListLayout & {
     rows: ProjectHomeRow[];
     onToggle: (projectId: string) => void;
     onToggleArchive?: () => void;
+    /** A search is running: an empty list means it matched nothing. */
+    showNoResults?: boolean;
 }) => {
     const styles = stylesheet;
     const { theme } = useUnistyles();
@@ -249,11 +279,14 @@ export const ProjectHomeListView = React.memo(({
     }, [onToggle, onToggleArchive, styles, theme]);
 
     const ListHeader = React.useCallback(() => (
-        <HomeListHeader
-            style={topContentInset > 0 ? styles.updateBanner : undefined}
-            headerStyle={topContentInset > 0 ? styles.updateBannerHeader : undefined}
-        />
-    ), [styles, topContentInset]);
+        <>
+            {searchField && <SessionSearchField style={styles.searchField} />}
+            <HomeListHeader
+                style={topContentInset > 0 ? styles.updateBanner : undefined}
+                headerStyle={topContentInset > 0 ? styles.updateBannerHeader : undefined}
+            />
+        </>
+    ), [searchField, styles, topContentInset]);
 
     return (
         <View style={styles.container}>
@@ -263,6 +296,7 @@ export const ProjectHomeListView = React.memo(({
                     renderItem={renderItem}
                     keyExtractor={keyExtractor}
                     ListHeaderComponent={ListHeader}
+                    ListEmptyComponent={showNoResults ? SessionSearchNoResults : undefined}
                     contentContainerStyle={{
                         paddingTop: topContentInset,
                         paddingBottom: safeArea.bottom + bottomContentInset,
@@ -762,6 +796,11 @@ const stylesheet = StyleSheet.create((theme) => ({
     },
     updateBannerHeader: {
         paddingTop: 4,
+    },
+    searchField: {
+        marginHorizontal: 16,
+        marginTop: 8,
+        marginBottom: 8,
     },
     pressed: {
         opacity: 0.55,

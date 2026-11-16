@@ -564,6 +564,9 @@ export const ca: TranslationStructure = {
         bots: 'Bots',
         showAllWorkspaces: ({ count }: { count: number }) => `Mostra els ${count} espais de treball`,
         showFewerWorkspaces: 'Mostra\u2019n menys',
+        searchPlaceholder: 'Cerca sessions',
+        searchClear: 'Esborra la cerca',
+        searchNoResults: ({ query }: { query: string }) => `Cap sessió coincideix amb «${query}»`,
     },
 
     zen: {

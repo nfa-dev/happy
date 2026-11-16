@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useHeaderHeight } from '@/utils/responsive';
 import { VoiceAssistantStatusBar } from './VoiceAssistantStatusBar';
-import { useRealtimeStatus, useSettingMutable } from '@/sync/storage';
+import { useRealtimeStatus, useSessionListViewData, useSettingMutable } from '@/sync/storage';
 import { MainView } from './MainView';
 import { StyleSheet } from 'react-native-unistyles';
 import { t } from '@/text';
@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Typography } from '@/constants/Typography';
 import { ShortcutHintBadge, useShortcutHints } from './ShortcutHints';
 import { useHasArchivedSessions } from '@/hooks/useVisibleSessionListViewData';
+import { SessionSearchField } from './SessionSearchField';
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -57,6 +58,11 @@ const stylesheet = StyleSheet.create((theme) => ({
     archiveButtonActive: {
         backgroundColor: theme.colors.surfaceSelected,
     },
+    searchField: {
+        marginHorizontal: 16,
+        marginTop: 4,
+        marginBottom: 8,
+    },
     shortcutTargetActive: {
         backgroundColor: theme.colors.surfacePressed,
     },
@@ -97,6 +103,8 @@ export const SidebarView = React.memo(() => {
     // have no rename migration — but it hides archived sessions only.
     const [hideArchivedSessions, setHideArchivedSessions] = useSettingMutable('hideInactiveSessions');
     const { visible: shortcutHintsVisible } = useShortcutHints();
+    // Archived chats count: the search finds them even while the archive is hidden.
+    const hasSessions = (useSessionListViewData()?.length ?? 0) > 0;
 
     const handleNewSession = React.useCallback(() => {
         router.navigate('/new');
@@ -141,6 +149,8 @@ export const SidebarView = React.memo(() => {
                     </Pressable>
                 )}
             </View>
+
+            {hasSessions && <SessionSearchField style={styles.searchField} />}
 
             {realtimeStatus !== 'disconnected' && (
                 <VoiceAssistantStatusBar variant="sidebar" />

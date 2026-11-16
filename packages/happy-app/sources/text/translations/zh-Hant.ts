@@ -564,6 +564,9 @@ export const zhHant: TranslationStructure = {
         bots: '機器人',
         showAllWorkspaces: ({ count }: { count: number }) => `顯示全部 ${count} 個工作區`,
         showFewerWorkspaces: '收合',
+        searchPlaceholder: '搜尋對話',
+        searchClear: '清除搜尋',
+        searchNoResults: ({ query }: { query: string }) => `沒有符合「${query}」的對話`,
     },
 
     zen: {

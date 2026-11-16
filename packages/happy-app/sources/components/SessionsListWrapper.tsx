@@ -124,6 +124,7 @@ export const SessionsListWrapper = React.memo(({
                     scrollIndicatorTopInset={scrollIndicatorTopInset}
                     bottomContentInset={bottomContentInset}
                     onScroll={onScroll}
+                    searchField
                 />
             </View>
         );
@@ -136,6 +137,7 @@ export const SessionsListWrapper = React.memo(({
                 scrollIndicatorTopInset={scrollIndicatorTopInset}
                 bottomContentInset={bottomContentInset}
                 onScroll={onScroll}
+                searchField
             />
         </View>
     );

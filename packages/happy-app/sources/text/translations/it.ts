@@ -562,6 +562,9 @@ export const it: TranslationStructure = {
         bots: 'Bot',
         showAllWorkspaces: ({ count }: { count: number }) => `Mostra tutti i ${count} spazi di lavoro`,
         showFewerWorkspaces: 'Mostra meno',
+        searchPlaceholder: 'Cerca sessioni',
+        searchClear: 'Cancella ricerca',
+        searchNoResults: ({ query }: { query: string }) => `Nessuna sessione corrisponde a «${query}»`,
     },
 
     zen: {

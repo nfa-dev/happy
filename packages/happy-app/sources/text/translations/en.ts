@@ -582,6 +582,9 @@ export const en: TranslationStructure = {
         bots: 'Bots',
         showAllWorkspaces: ({ count }: { count: number }) => `Show all ${count} workspaces`,
         showFewerWorkspaces: 'Show fewer',
+        searchPlaceholder: 'Search sessions',
+        searchClear: 'Clear search',
+        searchNoResults: ({ query }: { query: string }) => `No sessions match “${query}”`,
     },
 
     zen: {

@@ -580,6 +580,9 @@ export const ru: TranslationStructure = {
         bots: 'Боты',
         showAllWorkspaces: ({ count }: { count: number }) => `Показать все пространства (${count})`,
         showFewerWorkspaces: 'Показать меньше',
+        searchPlaceholder: 'Поиск сессий',
+        searchClear: 'Очистить поиск',
+        searchNoResults: ({ query }: { query: string }) => `Нет сессий по запросу «${query}»`,
     },
 
     zen: {

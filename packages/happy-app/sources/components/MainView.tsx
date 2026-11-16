@@ -11,6 +11,7 @@ import { useFriendRequests, useRealtimeStatus, useSettingMutable } from '@/sync/
 import { SESSION_LIST_GROUPING_MODES, type SessionListGrouping } from '@/sync/settings';
 import { NativeSettingsMenu, type NativeSettingsMenuGroup } from './NativeSettingsMenu';
 import { useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
+import { useIsSessionListSearching } from '@/hooks/useSessionListSearch';
 import { useIsTablet } from '@/utils/responsive';
 import { useRouter } from 'expo-router';
 import { EmptySessionsTablet } from './EmptySessionsTablet';
@@ -257,6 +258,7 @@ const HeaderRight = React.memo(({ activeTab }: { activeTab: ActiveTabType }) => 
 export const MainView = React.memo(({ variant }: MainViewProps) => {
     const { theme } = useUnistyles();
     const sessionListViewData = useVisibleSessionListViewData();
+    const searching = useIsSessionListSearching();
     const isTablet = useIsTablet();
     const router = useRouter();
     const friendRequests = useFriendRequests();
@@ -337,8 +339,9 @@ export const MainView = React.memo(({ variant }: MainViewProps) => {
             );
         }
 
-        // Empty state
-        if (sessionListViewData.length === 0) {
+        // Empty state. A search can still find archived chats while the
+        // archive is hidden, so it gets the list even with nothing visible.
+        if (sessionListViewData.length === 0 && !searching) {
             return (
                 <View style={styles.sidebarContentContainer}>
                     <View style={styles.emptyStateContainer}>
