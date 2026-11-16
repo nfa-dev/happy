@@ -569,6 +569,18 @@ export const es: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `Ninguna sesión coincide con «${query}»`,
     },
 
+    sessionSearch: {
+        title: 'Buscar en la sesión',
+        placeholder: 'Buscar mensajes',
+        hint: 'Busca en todos los mensajes de esta sesión, también los antiguos',
+        loading: ({ count }: { count: number }) => `Cargando mensajes anteriores… ${count} cargados`,
+        results: ({ count }: { count: number }) => count === 1 ? '1 coincidencia' : `${count} coincidencias`,
+        resultsCapped: ({ count }: { count: number }) => `Se muestran las primeras ${count} coincidencias`,
+        noResults: ({ query }: { query: string }) => `Ningún mensaje coincide con «${query}»`,
+        you: 'Tú',
+        agent: 'Agente',
+    },
+
     zen: {
         toggle: 'Modo zen',
     },

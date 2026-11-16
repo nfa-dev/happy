@@ -2468,7 +2468,9 @@ class Sync {
      * Resolves true only when the cursor moved back: callers that page
      * automatically continue on true and rest on false.
      */
-    loadOlderMessages = async (sessionId: string): Promise<boolean> => {
+    // `limit` is the page size (the server takes up to 500). The chat's own
+    // scroll-back keeps 100; a search pulling the whole history asks for more.
+    loadOlderMessages = async (sessionId: string, limit = 100): Promise<boolean> => {
         const oldestSeq = this.sessionOldestSeq.get(sessionId);
         if (oldestSeq === undefined || oldestSeq <= 1) {
             return false;
@@ -2497,7 +2499,7 @@ class Sync {
                     return false;
                 }
                 const response = await apiSocket.request(
-                    `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=100`
+                    `/v3/sessions/${sessionId}/messages?before_seq=${beforeSeq}&limit=${limit}`
                 );
                 if (!response.ok) {
                     throw new Error(`Failed to load older messages for ${sessionId}: ${response.status}`);

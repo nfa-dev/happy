@@ -569,6 +569,18 @@ export const zhHant: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `沒有符合「${query}」的對話`,
     },
 
+    sessionSearch: {
+        title: '在對話中搜尋',
+        placeholder: '搜尋訊息',
+        hint: '搜尋此對話的所有訊息，包括較早的訊息',
+        loading: ({ count }: { count: number }) => `正在載入較早的訊息… 已載入 ${count} 則`,
+        results: ({ count }: { count: number }) => `${count} 則結果`,
+        resultsCapped: ({ count }: { count: number }) => `僅顯示前 ${count} 則結果`,
+        noResults: ({ query }: { query: string }) => `沒有符合「${query}」的訊息`,
+        you: '你',
+        agent: '代理',
+    },
+
     zen: {
         toggle: '禪模式',
     },

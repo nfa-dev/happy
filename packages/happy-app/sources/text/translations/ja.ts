@@ -570,6 +570,18 @@ export const ja: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `「${query}」に一致するセッションはありません`,
     },
 
+    sessionSearch: {
+        title: 'セッション内を検索',
+        placeholder: 'メッセージを検索',
+        hint: 'このセッションのすべてのメッセージ（古いものも含む）を検索します',
+        loading: ({ count }: { count: number }) => `古いメッセージを読み込み中… ${count} 件読み込み済み`,
+        results: ({ count }: { count: number }) => `${count} 件一致`,
+        resultsCapped: ({ count }: { count: number }) => `最初の ${count} 件を表示しています`,
+        noResults: ({ query }: { query: string }) => `「${query}」に一致するメッセージはありません`,
+        you: 'あなた',
+        agent: 'エージェント',
+    },
+
     zen: {
         toggle: 'Zenモード',
     },

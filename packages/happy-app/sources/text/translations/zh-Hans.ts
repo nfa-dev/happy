@@ -570,6 +570,18 @@ export const zhHans: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `没有与“${query}”匹配的会话`,
     },
 
+    sessionSearch: {
+        title: '在会话中搜索',
+        placeholder: '搜索消息',
+        hint: '搜索此会话的所有消息，包括较早的消息',
+        loading: ({ count }: { count: number }) => `正在加载较早的消息… 已加载 ${count} 条`,
+        results: ({ count }: { count: number }) => `${count} 条结果`,
+        resultsCapped: ({ count }: { count: number }) => `仅显示前 ${count} 条结果`,
+        noResults: ({ query }: { query: string }) => `没有与“${query}”匹配的消息`,
+        you: '你',
+        agent: '代理',
+    },
+
     zen: {
         toggle: '禅模式',
     },

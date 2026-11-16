@@ -56,6 +56,9 @@ export const SIDEBAR_PICKER_SHORTCUTS: Readonly<Record<SidebarPickerShortcutId, 
     newSideChat: { key: 's', code: 'KeyS', keyLabel: 'S', altKey: true },
 };
 
+/** ⌘F / Ctrl+F: the search inside the session on screen (web). */
+export const SESSION_SEARCH_SHORTCUT: ShortcutChord = { key: 'f', code: 'KeyF', keyLabel: 'F' };
+
 export const GLOBAL_SHORTCUTS: ReadonlyArray<{
     id: GlobalShortcutId;
     key: string;

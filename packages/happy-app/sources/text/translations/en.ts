@@ -587,6 +587,18 @@ export const en: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `No sessions match “${query}”`,
     },
 
+    sessionSearch: {
+        title: 'Search in session',
+        placeholder: 'Search messages',
+        hint: 'Searches every message in this session, older ones included',
+        loading: ({ count }: { count: number }) => `Loading older messages… ${count} loaded`,
+        results: ({ count }: { count: number }) => count === 1 ? '1 match' : `${count} matches`,
+        resultsCapped: ({ count }: { count: number }) => `Showing the first ${count} matches`,
+        noResults: ({ query }: { query: string }) => `No messages match “${query}”`,
+        you: 'You',
+        agent: 'Agent',
+    },
+
     zen: {
         toggle: 'Zen mode',
     },

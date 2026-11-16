@@ -23,6 +23,7 @@ import { VoiceAssistantStatusBar, VOICE_PILL_TOTAL_HEIGHT } from '@/components/V
 import { useComposerModes } from '@/hooks/useComposerModes';
 import { useDraft } from '@/hooks/useDraft';
 import { useSessionVisibility } from '@/hooks/useSessionVisibility';
+import { useSessionSearchShortcut } from '@/hooks/useSessionSearchShortcut';
 import { useImagePicker } from '@/hooks/useImagePicker';
 import { Modal } from '@/modal';
 import { voiceHooks } from '@/realtime/hooks/voiceHooks';
@@ -442,7 +443,21 @@ export const SessionView = React.memo((props: { id: string }) => {
                 />
             </Pressable>
         )
-        : null;
+        // Web and tablets have no avatar control here, so the slot holds the
+        // search inside this session.
+        : session
+            ? (
+                <Pressable
+                    onPress={() => router.push(`/session/${session.id}/search`)}
+                    hitSlop={10}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('sessionSearch.title')}
+                >
+                    <Ionicons name="search" size={20} color={theme.colors.header.tint} />
+                </Pressable>
+            )
+            : null;
+    useSessionSearchShortcut(session?.id ?? null, !diffViewOpen && !fileViewPath);
 
     const mainContent = (
         <>

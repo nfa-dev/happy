@@ -585,6 +585,18 @@ export const ru: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `Нет сессий по запросу «${query}»`,
     },
 
+    sessionSearch: {
+        title: 'Поиск в сессии',
+        placeholder: 'Поиск по сообщениям',
+        hint: 'Ищет по всем сообщениям этой сессии, включая старые',
+        loading: ({ count }: { count: number }) => `Загрузка старых сообщений… загружено ${count}`,
+        results: ({ count }: { count: number }) => count === 1 ? '1 совпадение' : `Совпадений: ${count}`,
+        resultsCapped: ({ count }: { count: number }) => `Показаны первые совпадения: ${count}`,
+        noResults: ({ query }: { query: string }) => `Нет сообщений по запросу «${query}»`,
+        you: 'Вы',
+        agent: 'Агент',
+    },
+
     zen: {
         toggle: 'Дзен-режим',
     },

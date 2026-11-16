@@ -568,6 +568,18 @@ export const pt: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `Nenhuma sessão corresponde a “${query}”`,
     },
 
+    sessionSearch: {
+        title: 'Pesquisar na sessão',
+        placeholder: 'Pesquisar mensagens',
+        hint: 'Pesquisa todas as mensagens desta sessão, incluindo as mais antigas',
+        loading: ({ count }: { count: number }) => `Carregando mensagens anteriores… ${count} carregadas`,
+        results: ({ count }: { count: number }) => count === 1 ? '1 resultado' : `${count} resultados`,
+        resultsCapped: ({ count }: { count: number }) => `Mostrando os primeiros ${count} resultados`,
+        noResults: ({ query }: { query: string }) => `Nenhuma mensagem corresponde a “${query}”`,
+        you: 'Você',
+        agent: 'Agente',
+    },
+
     zen: {
         toggle: 'Modo zen',
     },

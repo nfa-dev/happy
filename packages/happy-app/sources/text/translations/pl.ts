@@ -585,6 +585,18 @@ export const pl: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `Brak sesji pasujących do „${query}”`,
     },
 
+    sessionSearch: {
+        title: 'Szukaj w sesji',
+        placeholder: 'Szukaj wiadomości',
+        hint: 'Przeszukuje wszystkie wiadomości tej sesji, także starsze',
+        loading: ({ count }: { count: number }) => `Wczytywanie starszych wiadomości… wczytano ${count}`,
+        results: ({ count }: { count: number }) => count === 1 ? '1 wynik' : `Wyniki: ${count}`,
+        resultsCapped: ({ count }: { count: number }) => `Pokazano pierwsze wyniki: ${count}`,
+        noResults: ({ query }: { query: string }) => `Brak wiadomości pasujących do „${query}”`,
+        you: 'Ty',
+        agent: 'Agent',
+    },
+
     zen: {
         toggle: 'Tryb zen',
     },

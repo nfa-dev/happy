@@ -567,6 +567,18 @@ export const it: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `Nessuna sessione corrisponde a «${query}»`,
     },
 
+    sessionSearch: {
+        title: 'Cerca nella sessione',
+        placeholder: 'Cerca messaggi',
+        hint: 'Cerca in tutti i messaggi di questa sessione, anche quelli meno recenti',
+        loading: ({ count }: { count: number }) => `Caricamento dei messaggi precedenti… ${count} caricati`,
+        results: ({ count }: { count: number }) => count === 1 ? '1 risultato' : `${count} risultati`,
+        resultsCapped: ({ count }: { count: number }) => `Mostrati i primi ${count} risultati`,
+        noResults: ({ query }: { query: string }) => `Nessun messaggio corrisponde a «${query}»`,
+        you: 'Tu',
+        agent: 'Agente',
+    },
+
     zen: {
         toggle: 'Modalità zen',
     },

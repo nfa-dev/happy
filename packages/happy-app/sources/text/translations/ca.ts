@@ -569,6 +569,18 @@ export const ca: TranslationStructure = {
         searchNoResults: ({ query }: { query: string }) => `Cap sessió coincideix amb «${query}»`,
     },
 
+    sessionSearch: {
+        title: 'Cerca a la sessió',
+        placeholder: 'Cerca missatges',
+        hint: 'Cerca en tots els missatges d’aquesta sessió, també els antics',
+        loading: ({ count }: { count: number }) => `Carregant missatges anteriors… ${count} carregats`,
+        results: ({ count }: { count: number }) => count === 1 ? '1 coincidència' : `${count} coincidències`,
+        resultsCapped: ({ count }: { count: number }) => `Es mostren les primeres ${count} coincidències`,
+        noResults: ({ query }: { query: string }) => `Cap missatge coincideix amb «${query}»`,
+        you: 'Tu',
+        agent: 'Agent',
+    },
+
     zen: {
         toggle: 'Mode zen',
     },
