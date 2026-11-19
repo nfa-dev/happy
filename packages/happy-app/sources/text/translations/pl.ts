@@ -583,6 +583,11 @@ export const pl: TranslationStructure = {
         searchPlaceholder: 'Szukaj sesji',
         searchClear: 'Wyczyść wyszukiwanie',
         searchNoResults: ({ query }: { query: string }) => `Brak sesji pasujących do „${query}”`,
+        machineFilterTitle: 'Maszyna',
+        allMachines: 'Wszystkie maszyny',
+        unknownMachine: 'Nieznana maszyna',
+        machineFilterNoResults: ({ machine }: { machine: string }) => `Brak sesji na ${machine}`,
+        searchNoResultsOnMachine: ({ query, machine }: { query: string; machine: string }) => `Brak sesji na ${machine} pasujących do „${query}”`,
     },
 
     sessionSearch: {

@@ -167,7 +167,8 @@ const MachineSeparator = React.memo(({ machineName, machineId }: { machineName: 
 
 export function ActiveSessionsGroupCompact({ sessions, selectedSessionId }: ActiveSessionsGroupProps) {
     const styles = stylesheet;
-    const machines = useAllMachines();
+    // Offline ones too, or an offline computer's separator shows its raw id.
+    const machines = useAllMachines({ includeOffline: true });
 
     const machineGroups = React.useMemo(() => buildActiveSessionDisplayGroups(
         sessions,

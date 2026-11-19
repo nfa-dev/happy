@@ -11,9 +11,15 @@ import { ProjectGroup } from './ProjectGroup';
 import { FlatSessionRow, flatListBackgroundColor } from './FlatSessionRow';
 import { buildFlatSessionRows, toFlatSessionRow, type FlatSessionRowData } from '@/utils/flatSessionList';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useHasArchivedSessions, useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
-import { useIsSessionListSearching, useSearchedSessionListViewData } from '@/hooks/useSessionListSearch';
+import { useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
+import { useIsSessionListSearching } from '@/hooks/useSessionListSearch';
+import {
+    useHasArchivedSessionsOnFilteredMachine,
+    useNarrowedSessionListViewData,
+    useSessionListMachineFilter,
+} from '@/hooks/useSessionListMachineFilter';
 import { SessionSearchField, SessionSearchNoResults } from './SessionSearchField';
+import { SessionMachineFilter } from './SessionMachineFilter';
 import { Typography } from '@/constants/Typography';
 import { StatusDot } from './StatusDot';
 import { StyleSheet, useUnistyles } from 'react-native-unistyles';
@@ -44,6 +50,12 @@ type SessionListDisplayItem = SessionListViewItem | {
     row: FlatSessionRowData;
     last: boolean;
     archived?: boolean;
+    machineName: string | null;
+} | {
+    // The search or the machine filter left nothing: said in the list, above
+    // an archive toggle that may still be there, rather than as a blank page.
+    type: 'no-results';
+    machine: string | null;
 };
 
 const stylesheet = StyleSheet.create((theme) => ({
@@ -277,6 +289,10 @@ const stylesheet = StyleSheet.create((theme) => ({
         marginTop: 8,
         marginBottom: 8,
     },
+    machineFilter: {
+        marginHorizontal: 16,
+        marginBottom: 8,
+    },
 }));
 
 const MachineHeader = React.memo(({ machineId, machineName }: {
@@ -333,9 +349,17 @@ export function SessionsList({
     const styles = stylesheet;
     const safeArea = useSafeAreaInsets();
     const visibleData = useVisibleSessionListViewData();
-    const sourceData = useSearchedSessionListViewData();
+    const sourceData = useNarrowedSessionListViewData();
     const searching = useIsSessionListSearching();
-    const hasArchivedSessions = useHasArchivedSessions();
+    const hasArchivedSessions = useHasArchivedSessionsOnFilteredMachine();
+    const { selected: machineFilter, machines: listMachines, nameOf } = useSessionListMachineFilter();
+    // A row names its computer only once the list spans more than one; on a
+    // single computer the name would sit on every row and say nothing.
+    const labelMachines = listMachines.length > 1;
+    const machineNameOf = React.useCallback(
+        (session: SessionRowData) => (labelMachines ? nameOf(session) || null : null),
+        [labelMachines, nameOf],
+    );
     // Stored under its original `hideInactiveSessions` key — synced settings
     // have no rename migration — but it hides archived sessions only.
     const [hideArchivedSessions, setHideArchivedSessions] = useSettingMutable('hideInactiveSessions');
@@ -343,7 +367,9 @@ export function SessionsList({
     // is offered back through the home filter menu for people who organized
     // around it.
     const flatSessionList = useSetting('sessionListGrouping') !== 'project';
-    const machines = useAllMachines();
+    // Offline ones too: the machine headings name a computer by these, and
+    // one missing from the list was headed by its raw id.
+    const machines = useAllMachines({ includeOffline: true });
     const pathname = usePathname();
     const isTablet = useIsTablet();
     // Selection is derived once from pathname so the data array stays stable
@@ -380,6 +406,12 @@ export function SessionsList({
         const archiveToggle: SessionListDisplayItem[] = hasArchivedSessions && !searching
             ? [{ type: 'archive-toggle', hidden: hideArchivedSessions }]
             : [];
+        // With nothing but the toggle left, the list still says why.
+        const withNoResults = (items: SessionListDisplayItem[]): SessionListDisplayItem[] => (
+            (searching || machineFilter !== null) && items.every((item) => item.type === 'archive-toggle')
+                ? [{ type: 'no-results', machine: machineFilter }, ...items]
+                : items
+        );
 
         if (flatSessionList) {
             // A chat list should always float the thing the user just replied
@@ -389,6 +421,7 @@ export function SessionsList({
                 type: 'flat-session',
                 row,
                 last: index === flatRows.length - 1,
+                machineName: machineNameOf(row.session),
             }));
             // The archive is the same column, only retired: its rows get the
             // flat row too rather than reverting to inset cards. The toggle
@@ -402,13 +435,14 @@ export function SessionsList({
                         row: toFlatSessionRow(item.session),
                         last: index === archivedRows.length - 1,
                         archived: true,
+                        machineName: machineNameOf(item.session),
                     }
                     : item
             ));
             const flatToggle = archiveToggle.map<SessionListDisplayItem>((item) => (
                 item.type === 'archive-toggle' ? { ...item, banded: true } : item
             ));
-            return [...flatItems, ...flatToggle, ...flatArchived];
+            return withNoResults([...flatItems, ...flatToggle, ...flatArchived]);
         }
 
         const machineGroups = buildSessionProjectDisplayGroups(
@@ -417,7 +451,7 @@ export function SessionsList({
             t('status.unknown'),
         );
         if (machineGroups.length === 0) {
-            return [...groupedRows, ...archiveToggle, ...archivedRows];
+            return withNoResults([...groupedRows, ...archiveToggle, ...archivedRows]);
         }
 
         const hierarchy = machineGroups.flatMap<SessionListDisplayItem>((group) => [
@@ -431,8 +465,8 @@ export function SessionsList({
         const legacyItems = groupedRows.filter((item) => (
             item.type !== 'project' && item.type !== 'projects-header'
         ));
-        return [...legacyItems, ...hierarchy, ...archiveToggle, ...archivedRows];
-    }, [flatSessionList, hasArchivedSessions, hideArchivedSessions, machines, searching, sourceData]);
+        return withNoResults([...legacyItems, ...hierarchy, ...archiveToggle, ...archivedRows]);
+    }, [flatSessionList, hasArchivedSessions, hideArchivedSessions, machineFilter, machineNameOf, machines, searching, sourceData]);
 
     // Early return if no data yet
     if (!data) {
@@ -446,6 +480,7 @@ export function SessionsList({
             case 'bots': return 'bots';
             case 'machine-header': return `machine-header-${JSON.stringify(item.machineId)}`;
             case 'archive-toggle': return 'archive-toggle';
+            case 'no-results': return 'no-results';
             case 'flat-session': return `flat-session-${item.row.session.id}`;
             case 'header': return `header-${item.title}-${index}`;
             case 'active-sessions': return 'active-sessions';
@@ -470,6 +505,7 @@ export function SessionsList({
                                 row={toFlatSessionRow(session)}
                                 selected={session.id === selectedSessionId}
                                 showBorder={botIndex < item.sessions.length - 1}
+                                machineName={machineNameOf(session)}
                             />
                         ))}
                     </View>
@@ -489,8 +525,12 @@ export function SessionsList({
                         selected={item.row.session.id === selectedSessionId}
                         showBorder={!item.last}
                         archived={item.archived}
+                        machineName={item.machineName}
                     />
                 );
+
+            case 'no-results':
+                return <SessionSearchNoResults machine={item.machine} />;
 
             case 'archive-toggle':
                 return (
@@ -575,10 +615,11 @@ export function SessionsList({
                         isFirst={isFirst}
                         isLast={isLast}
                         isSingle={isSingle}
+                        machineName={machineNameOf(item.session)}
                     />
                 );
         }
-    }, [selectedSessionId, data, flatSessionList]);
+    }, [selectedSessionId, data, flatSessionList, machineNameOf]);
 
 
     // Remove this section as we'll use FlatList for all items now
@@ -589,13 +630,14 @@ export function SessionsList({
         return (
             <>
                 {searchField && <SessionSearchField style={styles.searchField} />}
+                {searchField && <SessionMachineFilter style={styles.machineFilter} />}
                 <HomeListHeader
                     style={isPhoneLayout ? styles.phoneUpdateBanner : undefined}
                     headerStyle={isPhoneLayout ? styles.phoneUpdateBannerHeader : undefined}
                 />
             </>
         );
-    }, [searchField, styles.phoneUpdateBanner, styles.phoneUpdateBannerHeader, styles.searchField, topContentInset]);
+    }, [searchField, styles.machineFilter, styles.phoneUpdateBanner, styles.phoneUpdateBannerHeader, styles.searchField, topContentInset]);
 
     // Footer removed - all sessions now shown inline
 
@@ -613,7 +655,6 @@ export function SessionsList({
                         maxWidth: layout.maxWidth,
                     }}
                     ListHeaderComponent={HeaderComponent}
-                    ListEmptyComponent={searching ? SessionSearchNoResults : undefined}
                     automaticallyAdjustsScrollIndicatorInsets={scrollIndicatorTopInset === 0}
                     scrollIndicatorInsets={scrollIndicatorTopInset > 0
                         ? { top: scrollIndicatorTopInset }
@@ -637,14 +678,17 @@ const STATUS_CONFIG: Record<SessionState, { color: string; dotColor: string; isP
     input_required: { color: '#FF9500', dotColor: '#FF9500', isPulsing: true, isConnected: true },
 };
 
-const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }: {
+const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle, machineName }: {
     session: SessionRowData;
     selected?: boolean;
     isFirst?: boolean;
     isLast?: boolean;
     isSingle?: boolean;
+    /** The computer, after the subtitle: these cards sit under dates, not machines. */
+    machineName?: string | null;
 }) => {
     const styles = stylesheet;
+    const withMachine = (text: string | null | undefined) => [text, machineName].filter(Boolean).join(' · ');
     const sessionPressHandlers = useSessionPressHandlers(session.id);
     const [actionsAnchor, setActionsAnchor] = React.useState<SessionActionsAnchor | null>(null);
     const baseStatus = STATUS_CONFIG[session.state];
@@ -735,18 +779,18 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle }
                     <View style={styles.sessionSubtitleRow}>
                         <ProviderIcon kind={session.providerKind} size={13} />
                         <Text style={styles.sessionSubtitle} numberOfLines={1}>
-                            {session.identityLine}
+                            {withMachine(session.identityLine)}
                         </Text>
                     </View>
                 ) : session.path ? (
                     <View style={styles.sessionSubtitleRow}>
                         <Text style={styles.sessionSubtitle} numberOfLines={1}>
-                            {session.path.split(/[/\\]/).filter(Boolean).pop()}
+                            {withMachine(session.path.split(/[/\\]/).filter(Boolean).pop())}
                         </Text>
                     </View>
                 ) : (
                     <Text style={styles.sessionSubtitle} numberOfLines={1}>
-                        {session.botId ? toFlatSessionRow(session).projectName : session.subtitle}
+                        {withMachine(session.botId ? toFlatSessionRow(session).projectName : session.subtitle)}
                     </Text>
                 )}
 

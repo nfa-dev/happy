@@ -583,6 +583,11 @@ export const ru: TranslationStructure = {
         searchPlaceholder: 'Поиск сессий',
         searchClear: 'Очистить поиск',
         searchNoResults: ({ query }: { query: string }) => `Нет сессий по запросу «${query}»`,
+        machineFilterTitle: 'Машина',
+        allMachines: 'Все машины',
+        unknownMachine: 'Неизвестная машина',
+        machineFilterNoResults: ({ machine }: { machine: string }) => `Нет сессий на ${machine}`,
+        searchNoResultsOnMachine: ({ query, machine }: { query: string; machine: string }) => `Нет сессий на ${machine} по запросу «${query}»`,
     },
 
     sessionSearch: {

@@ -25,6 +25,8 @@ export const LocalSettingsSchema = z.object({
     expandedProjects: z.record(z.string(), z.boolean()).describe('Projects showing all workspaces instead of the first few'),
     // Boxes ticked on the "Link your computer" checklist - keyed by step id
     linkComputerChecklist: z.record(z.string(), z.boolean()).describe('Ticked steps on the link-your-computer checklist'),
+    // The computer the home list is narrowed to, by the name its rows show
+    sessionListMachineFilter: z.string().nullable().describe('Machine name the session list is filtered to; null shows every machine'),
 });
 
 //
@@ -55,6 +57,7 @@ export const localSettingsDefaults: LocalSettings = {
     acknowledgedCliVersions: {},
     expandedProjects: {},
     linkComputerChecklist: {},
+    sessionListMachineFilter: null,
 };
 Object.freeze(localSettingsDefaults);
 

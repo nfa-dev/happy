@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Text } from '@/components/StyledText';
 import { Typography } from '@/constants/Typography';
 import { useSessionListSearchStore } from '@/hooks/useSessionListSearch';
+import { sessionListMachineLabel } from './SessionMachineFilter';
 import { t } from '@/text';
 
 /**
@@ -74,12 +75,20 @@ export const SessionSearchField = React.memo(({ style }: { style?: StyleProp<Vie
     );
 });
 
-/** What the list shows in place of rows when a search matches no session. */
-export const SessionSearchNoResults = React.memo(() => {
+/**
+ * What the list shows in place of rows when the search, the machine filter or
+ * both leave no session. `machine` is the filter in force, null for none.
+ */
+export const SessionSearchNoResults = React.memo(({ machine }: { machine: string | null }) => {
     const query = useSessionListSearchStore((state) => state.query.trim());
+    const text = machine === null
+        ? t('sidebar.searchNoResults', { query })
+        : query
+            ? t('sidebar.searchNoResultsOnMachine', { query, machine: sessionListMachineLabel(machine) })
+            : t('sidebar.machineFilterNoResults', { machine: sessionListMachineLabel(machine) });
     return (
         <View style={styles.noResults}>
-            <Text style={styles.noResultsText}>{t('sidebar.searchNoResults', { query })}</Text>
+            <Text style={styles.noResultsText}>{text}</Text>
         </View>
     );
 });

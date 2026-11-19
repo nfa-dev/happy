@@ -15,7 +15,7 @@ import {
     getPreferredShortcutModifier,
 } from '@/keyboard/shortcuts';
 import { isTauri } from '@/utils/isTauri';
-import { useVisibleSessionListViewData } from '@/hooks/useVisibleSessionListViewData';
+import { useMachineFilteredSessionListViewData } from '@/hooks/useSessionListMachineFilter';
 import { getSessionShortcutIdsInDisplayOrder } from '@/utils/sessionDisplayOrder';
 import { t } from '@/text';
 
@@ -26,8 +26,11 @@ export function CommandPaletteProvider({ children }: { children: React.ReactNode
     const { logout, isAuthenticated } = useAuth();
     const sessions = storage(useShallow((state) => state.sessions));
     const commandPaletteEnabled = storage(useShallow((state) => state.localSettings.commandPaletteEnabled));
-    const sessionListViewData = useVisibleSessionListViewData();
-    const machines = useAllMachines();
+    // Numbered as the list shows them, so a shortcut never opens a chat the
+    // machine filter has hidden.
+    const sessionListViewData = useMachineFilteredSessionListViewData();
+    // The same machines the list orders its headings by, offline ones included.
+    const machines = useAllMachines({ includeOffline: true });
     const navigateToSession = useNavigateToSession();
     const preferredModifier = useMemo(() => getPreferredShortcutModifier(
         typeof navigator === 'undefined' ? undefined : navigator

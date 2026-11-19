@@ -567,6 +567,11 @@ export const ca: TranslationStructure = {
         searchPlaceholder: 'Cerca sessions',
         searchClear: 'Esborra la cerca',
         searchNoResults: ({ query }: { query: string }) => `Cap sessió coincideix amb «${query}»`,
+        machineFilterTitle: 'Màquina',
+        allMachines: 'Totes les màquines',
+        unknownMachine: 'Màquina desconeguda',
+        machineFilterNoResults: ({ machine }: { machine: string }) => `Cap sessió a ${machine}`,
+        searchNoResultsOnMachine: ({ query, machine }: { query: string; machine: string }) => `Cap sessió a ${machine} coincideix amb «${query}»`,
     },
 
     sessionSearch: {

@@ -568,6 +568,11 @@ export const zhHans: TranslationStructure = {
         searchPlaceholder: '搜索会话',
         searchClear: '清除搜索',
         searchNoResults: ({ query }: { query: string }) => `没有与“${query}”匹配的会话`,
+        machineFilterTitle: '设备',
+        allMachines: '所有设备',
+        unknownMachine: '未知设备',
+        machineFilterNoResults: ({ machine }: { machine: string }) => `${machine} 上没有会话`,
+        searchNoResultsOnMachine: ({ query, machine }: { query: string; machine: string }) => `${machine} 上没有与“${query}”匹配的会话`,
     },
 
     sessionSearch: {

@@ -567,6 +567,11 @@ export const zhHant: TranslationStructure = {
         searchPlaceholder: '搜尋對話',
         searchClear: '清除搜尋',
         searchNoResults: ({ query }: { query: string }) => `沒有符合「${query}」的對話`,
+        machineFilterTitle: '裝置',
+        allMachines: '所有裝置',
+        unknownMachine: '未知裝置',
+        machineFilterNoResults: ({ machine }: { machine: string }) => `${machine} 上沒有對話`,
+        searchNoResultsOnMachine: ({ query, machine }: { query: string; machine: string }) => `${machine} 上沒有符合「${query}」的對話`,
     },
 
     sessionSearch: {

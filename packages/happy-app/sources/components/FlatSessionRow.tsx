@@ -44,12 +44,17 @@ export function flatListBackgroundColor(theme: Theme): string {
  * with a hairline under it, so the list reads as one continuous column rather
  * than a stack of project cards.
  */
-export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived }: {
+export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived, machineName }: {
     row: FlatSessionRowData;
     selected?: boolean;
     showBorder?: boolean;
     /** Retired work: the same row, faded back and drained of avatar colour. */
     archived?: boolean;
+    /**
+     * The computer the session runs on, leading the worktree line. Left out
+     * while the whole list runs on one computer, where it would say nothing.
+     */
+    machineName?: string | null;
 }) => {
     const { session, projectName, workspaceName } = row;
     const styles = stylesheet;
@@ -205,6 +210,18 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived 
 
                 <View style={styles.workspaceRow}>
                     <View style={styles.workspaceLocation}>
+                        {machineName ? (
+                            <View style={styles.machine}>
+                                <Ionicons
+                                    name="desktop-outline"
+                                    size={12}
+                                    color={theme.colors.textSecondary}
+                                />
+                                <Text style={styles.workspace} numberOfLines={1}>
+                                    {machineName}
+                                </Text>
+                            </View>
+                        ) : null}
                         {workspaceName && (
                             <>
                                 <Text style={styles.workspace} numberOfLines={1}>
@@ -382,6 +399,17 @@ const stylesheet = StyleSheet.create((theme) => ({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 4,
+    },
+    // Where the session runs, ahead of the worktree it runs in. Kept apart
+    // from the worktree name by more than the icons' own gap so the two names
+    // never read as one.
+    machine: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        flexShrink: 1,
+        minWidth: 0,
+        marginRight: 6,
     },
     workspace: {
         flexShrink: 1,

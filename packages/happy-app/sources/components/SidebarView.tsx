@@ -11,8 +11,9 @@ import { t } from '@/text';
 import { Ionicons } from '@expo/vector-icons';
 import { Typography } from '@/constants/Typography';
 import { ShortcutHintBadge, useShortcutHints } from './ShortcutHints';
-import { useHasArchivedSessions } from '@/hooks/useVisibleSessionListViewData';
+import { useHasArchivedSessionsOnFilteredMachine } from '@/hooks/useSessionListMachineFilter';
 import { SessionSearchField } from './SessionSearchField';
+import { SessionMachineFilter } from './SessionMachineFilter';
 
 const stylesheet = StyleSheet.create((theme) => ({
     container: {
@@ -63,6 +64,10 @@ const stylesheet = StyleSheet.create((theme) => ({
         marginTop: 4,
         marginBottom: 8,
     },
+    machineFilter: {
+        marginHorizontal: 16,
+        marginBottom: 8,
+    },
     shortcutTargetActive: {
         backgroundColor: theme.colors.surfacePressed,
     },
@@ -98,7 +103,7 @@ export const SidebarView = React.memo(() => {
     const router = useRouter();
     const headerHeight = useHeaderHeight();
     const realtimeStatus = useRealtimeStatus();
-    const hasArchivedSessions = useHasArchivedSessions();
+    const hasArchivedSessions = useHasArchivedSessionsOnFilteredMachine();
     // Stored under its original `hideInactiveSessions` key — synced settings
     // have no rename migration — but it hides archived sessions only.
     const [hideArchivedSessions, setHideArchivedSessions] = useSettingMutable('hideInactiveSessions');
@@ -151,6 +156,7 @@ export const SidebarView = React.memo(() => {
             </View>
 
             {hasSessions && <SessionSearchField style={styles.searchField} />}
+            {hasSessions && <SessionMachineFilter style={styles.machineFilter} />}
 
             {realtimeStatus !== 'disconnected' && (
                 <VoiceAssistantStatusBar variant="sidebar" />

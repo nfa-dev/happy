@@ -585,6 +585,11 @@ export const en: TranslationStructure = {
         searchPlaceholder: 'Search sessions',
         searchClear: 'Clear search',
         searchNoResults: ({ query }: { query: string }) => `No sessions match “${query}”`,
+        machineFilterTitle: 'Machine',
+        allMachines: 'All machines',
+        unknownMachine: 'Unknown machine',
+        machineFilterNoResults: ({ machine }: { machine: string }) => `No sessions on ${machine}`,
+        searchNoResultsOnMachine: ({ query, machine }: { query: string; machine: string }) => `No sessions on ${machine} match “${query}”`,
     },
 
     sessionSearch: {

@@ -34,8 +34,12 @@ import {
     useSettingMutable,
     type SessionRowData,
 } from '@/sync/storage';
-import { useHasArchivedSessions } from '@/hooks/useVisibleSessionListViewData';
-import { useIsSessionListSearching, useSearchedSessionListViewData } from '@/hooks/useSessionListSearch';
+import { useIsSessionListSearching } from '@/hooks/useSessionListSearch';
+import {
+    useHasArchivedSessionsOnFilteredMachine,
+    useNarrowedSessionListViewData,
+    useSessionListMachineFilter,
+} from '@/hooks/useSessionListMachineFilter';
 import {
     buildProjectHomeRows,
     workspaceOrigin,
@@ -56,6 +60,7 @@ import { StatusDot } from './StatusDot';
 import { ShimmerText } from './ShimmerText';
 import { HomeListHeader } from './HomeListHeader';
 import { SessionSearchField, SessionSearchNoResults } from './SessionSearchField';
+import { SessionMachineFilter } from './SessionMachineFilter';
 import { layout } from './layout';
 
 // Every row starts with the same avatar and name columns. Disclosure controls
@@ -118,11 +123,13 @@ export interface ProjectHomeListLayout {
  * the same archive that the flat home list shows.
  */
 export const ProjectHomeList = React.memo((props: ProjectHomeListLayout) => {
-    const data = useSearchedSessionListViewData();
+    const data = useNarrowedSessionListViewData();
     const searching = useIsSessionListSearching();
-    const machines = useAllMachines();
+    const { selected: machineFilter } = useSessionListMachineFilter();
+    // Offline ones too, or an offline computer's heading shows its raw id.
+    const machines = useAllMachines({ includeOffline: true });
     const expanded = useLocalSetting('expandedProjects');
-    const hasArchivedSessions = useHasArchivedSessions();
+    const hasArchivedSessions = useHasArchivedSessionsOnFilteredMachine();
     // Stored under its original `hideInactiveSessions` key — synced settings
     // have no rename migration — but it hides archived sessions only.
     const [archiveHidden, setArchiveHidden] = useSettingMutable('hideInactiveSessions');
@@ -181,11 +188,15 @@ export const ProjectHomeList = React.memo((props: ProjectHomeListLayout) => {
             rows={rows}
             onToggle={toggle}
             onToggleArchive={toggleArchive}
-            showNoResults={searching}
+            showNoResults={searching || machineFilter !== null}
+            noResultsMachine={machineFilter}
             {...props}
         />
     );
 });
+
+/** A list row, or the line that says the search or the machine filter left none. */
+type ProjectHomeListItem = ProjectHomeRow | { type: 'noResults' };
 
 /**
  * The same screen driven by rows handed to it, so a preview or a test can
@@ -196,6 +207,7 @@ export const ProjectHomeListView = React.memo(({
     onToggle,
     onToggleArchive,
     showNoResults = false,
+    noResultsMachine = null,
     topContentInset = 0,
     scrollIndicatorTopInset = 0,
     bottomContentInset = 128,
@@ -205,15 +217,26 @@ export const ProjectHomeListView = React.memo(({
     rows: ProjectHomeRow[];
     onToggle: (projectId: string) => void;
     onToggleArchive?: () => void;
-    /** A search is running: an empty list means it matched nothing. */
+    /** A search or a machine filter is narrowing the rows: none left means it matched nothing. */
     showNoResults?: boolean;
+    /** The machine filter in force, for saying which computer had nothing. */
+    noResultsMachine?: string | null;
 }) => {
     const styles = stylesheet;
     const { theme } = useUnistyles();
     const safeArea = useSafeAreaInsets();
 
-    const keyExtractor = React.useCallback((row: ProjectHomeRow) => {
+    // An archive toggle can outlast every other row once the machine filter
+    // has narrowed them away; the line saying so goes above it.
+    const items = React.useMemo<ProjectHomeListItem[]>(() => (
+        showNoResults && rows.every((row) => row.type === 'archiveToggle')
+            ? [{ type: 'noResults' }, ...rows]
+            : rows
+    ), [rows, showNoResults]);
+
+    const keyExtractor = React.useCallback((row: ProjectHomeListItem) => {
         switch (row.type) {
+            case 'noResults': return 'no-results';
             case 'section': return `section-${row.id}`;
             case 'machine': return `machine-${row.machineId ?? 'unknown'}`;
             case 'bot': return `bot-${row.session.id}`;
@@ -226,8 +249,10 @@ export const ProjectHomeListView = React.memo(({
         }
     }, []);
 
-    const renderItem = React.useCallback(({ item }: { item: ProjectHomeRow }) => {
+    const renderItem = React.useCallback(({ item }: { item: ProjectHomeListItem }) => {
         switch (item.type) {
+            case 'noResults':
+                return <SessionSearchNoResults machine={noResultsMachine} />;
             case 'section':
                 return (
                     <View style={styles.section}>
@@ -276,11 +301,12 @@ export const ProjectHomeListView = React.memo(({
             case 'archived':
                 return <ChatRow session={item.session} archived />;
         }
-    }, [onToggle, onToggleArchive, styles, theme]);
+    }, [noResultsMachine, onToggle, onToggleArchive, styles, theme]);
 
     const ListHeader = React.useCallback(() => (
         <>
             {searchField && <SessionSearchField style={styles.searchField} />}
+            {searchField && <SessionMachineFilter style={styles.machineFilter} />}
             <HomeListHeader
                 style={topContentInset > 0 ? styles.updateBanner : undefined}
                 headerStyle={topContentInset > 0 ? styles.updateBannerHeader : undefined}
@@ -292,11 +318,10 @@ export const ProjectHomeListView = React.memo(({
         <View style={styles.container}>
             <View style={styles.contentContainer}>
                 <FlatList
-                    data={rows}
+                    data={items}
                     renderItem={renderItem}
                     keyExtractor={keyExtractor}
                     ListHeaderComponent={ListHeader}
-                    ListEmptyComponent={showNoResults ? SessionSearchNoResults : undefined}
                     contentContainerStyle={{
                         paddingTop: topContentInset,
                         paddingBottom: safeArea.bottom + bottomContentInset,
@@ -800,6 +825,10 @@ const stylesheet = StyleSheet.create((theme) => ({
     searchField: {
         marginHorizontal: 16,
         marginTop: 8,
+        marginBottom: 8,
+    },
+    machineFilter: {
+        marginHorizontal: 16,
         marginBottom: 8,
     },
     pressed: {

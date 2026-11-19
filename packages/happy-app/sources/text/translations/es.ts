@@ -567,6 +567,11 @@ export const es: TranslationStructure = {
         searchPlaceholder: 'Buscar sesiones',
         searchClear: 'Borrar búsqueda',
         searchNoResults: ({ query }: { query: string }) => `Ninguna sesión coincide con «${query}»`,
+        machineFilterTitle: 'Máquina',
+        allMachines: 'Todas las máquinas',
+        unknownMachine: 'Máquina desconocida',
+        machineFilterNoResults: ({ machine }: { machine: string }) => `No hay sesiones en ${machine}`,
+        searchNoResultsOnMachine: ({ query, machine }: { query: string; machine: string }) => `Ninguna sesión en ${machine} coincide con «${query}»`,
     },
 
     sessionSearch: {

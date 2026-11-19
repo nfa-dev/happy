@@ -568,6 +568,11 @@ export const ja: TranslationStructure = {
         searchPlaceholder: 'セッションを検索',
         searchClear: '検索をクリア',
         searchNoResults: ({ query }: { query: string }) => `「${query}」に一致するセッションはありません`,
+        machineFilterTitle: 'マシン',
+        allMachines: 'すべてのマシン',
+        unknownMachine: '不明なマシン',
+        machineFilterNoResults: ({ machine }: { machine: string }) => `${machine} のセッションはありません`,
+        searchNoResultsOnMachine: ({ query, machine }: { query: string; machine: string }) => `${machine} に「${query}」に一致するセッションはありません`,
     },
 
     sessionSearch: {
