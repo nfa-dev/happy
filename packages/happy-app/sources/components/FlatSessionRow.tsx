@@ -7,10 +7,11 @@ import { Text } from '@/components/StyledText';
 import { Typography } from '@/constants/Typography';
 import { Avatar } from './Avatar';
 import { StatusDot } from './StatusDot';
-import { SessionActionsAnchor, SessionActionsPopover } from './SessionActionsPopover';
+import { SessionActionsPopover } from './SessionActionsPopover';
 import { SessionShortcutHintBadge } from './ShortcutHints';
 import { useSessionPressHandlers } from '@/hooks/useNavigateToSession';
-import { useSessionActionAlert, useSessionArchiveAction } from '@/hooks/useSessionQuickActions';
+import { useSessionArchiveAction } from '@/hooks/useSessionQuickActions';
+import { useSessionActionsMenu } from '@/hooks/useSessionActionsMenu';
 import type { FlatSessionRowData } from '@/utils/flatSessionList';
 import { formatSessionListTimestamp } from '@/utils/sessionListTimestamp';
 import type { Theme } from '@/theme';
@@ -62,7 +63,7 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived,
     const sessionPressHandlers = useSessionPressHandlers(session.id);
     const swipeableRef = React.useRef<Swipeable | null>(null);
     const swipeEnabled = Platform.OS !== 'web';
-    const [actionsAnchor, setActionsAnchor] = React.useState<SessionActionsAnchor | null>(null);
+    const actionsMenu = useSessionActionsMenu(session.id);
 
     // Greying out is about the machine, not the session's own socket. A session
     // idle since yesterday on a machine that is still up is ordinary work you
@@ -116,28 +117,11 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived,
         archiveSession();
     }, [archiveSession]);
 
-    const handleContextMenu = React.useCallback((event: any) => {
-        event.preventDefault?.();
-        event.stopPropagation?.();
-        setActionsAnchor({
-            type: 'point',
-            x: event.nativeEvent.clientX ?? event.nativeEvent.pageX ?? 0,
-            y: event.nativeEvent.clientY ?? event.nativeEvent.pageY ?? 0,
-        });
-    }, []);
-
-    const showActionAlert = useSessionActionAlert(session.id);
-    const menuProps = Platform.OS === 'web' ? {
-        onContextMenu: handleContextMenu,
-    } as any : {
-        onLongPress: showActionAlert,
-    };
-
     const content = (
         <Pressable
-            style={[styles.row, selected && styles.rowSelected]}
+            style={[styles.row, selected && styles.rowSelected, actionsMenu.pressableStyle]}
             {...sessionPressHandlers}
-            {...menuProps}
+            {...actionsMenu.menuProps}
         >
             <View style={[styles.avatar, faded && styles.avatarFaded]}>
                 <Avatar
@@ -264,10 +248,8 @@ export const FlatSessionRow = React.memo(({ row, selected, showBorder, archived,
             <>
                 {content}
                 <SessionActionsPopover
-                    anchor={actionsAnchor}
-                    onClose={() => setActionsAnchor(null)}
+                    {...actionsMenu.popoverProps}
                     sessionId={session.id}
-                    visible={!!actionsAnchor}
                 />
             </>
         );

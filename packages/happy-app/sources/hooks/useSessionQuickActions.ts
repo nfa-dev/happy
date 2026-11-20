@@ -28,7 +28,7 @@ export interface SessionActionItem {
     destructive?: boolean;
 }
 
-interface UseSessionQuickActionsOptions {
+export interface UseSessionQuickActionsOptions {
     /**
      * Called on the press, before anything is asked of the machine.
      *

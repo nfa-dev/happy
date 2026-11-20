@@ -29,8 +29,8 @@ import { requestReview } from '@/utils/requestReview';
 import { HomeListHeader } from './HomeListHeader';
 import { layout } from './layout';
 import { useSessionPressHandlers } from '@/hooks/useNavigateToSession';
-import { SessionActionsAnchor, SessionActionsPopover } from './SessionActionsPopover';
-import { useSessionActionAlert } from '@/hooks/useSessionQuickActions';
+import { SessionActionsPopover } from './SessionActionsPopover';
+import { useSessionActionsMenu } from '@/hooks/useSessionActionsMenu';
 import { t } from '@/text';
 import { SessionShortcutHintBadge } from './ShortcutHints';
 import { ProviderIcon } from './ProviderIcon';
@@ -690,7 +690,7 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle, 
     const styles = stylesheet;
     const withMachine = (text: string | null | undefined) => [text, machineName].filter(Boolean).join(' · ');
     const sessionPressHandlers = useSessionPressHandlers(session.id);
-    const [actionsAnchor, setActionsAnchor] = React.useState<SessionActionsAnchor | null>(null);
+    const actionsMenu = useSessionActionsMenu(session.id);
     const baseStatus = STATUS_CONFIG[session.state];
     const needsUserAction = session.state === 'permission_required' || session.state === 'input_required';
     // User action stays orange and pulsing even when the request also marked the session unread.
@@ -714,23 +714,6 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle, 
                         ? t('status.lastSeen', { time: formatLastSeen(session.activeAt!, false) })
                         : t('status.online');
 
-    const handleContextMenu = React.useCallback((event: any) => {
-        event.preventDefault?.();
-        event.stopPropagation?.();
-        setActionsAnchor({
-            type: 'point',
-            x: event.nativeEvent.clientX ?? event.nativeEvent.pageX ?? 0,
-            y: event.nativeEvent.clientY ?? event.nativeEvent.pageY ?? 0,
-        });
-    }, []);
-
-    const showActionAlert = useSessionActionAlert(session.id);
-    const menuProps = Platform.OS === 'web' ? {
-        onContextMenu: handleContextMenu,
-    } as any : {
-        onLongPress: showActionAlert,
-    };
-
     return (
         <View style={[
             styles.sessionItemContainer,
@@ -744,10 +727,11 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle, 
                 selected && styles.sessionItemSelected,
                 isSingle ? styles.sessionItemSingle :
                     isFirst ? styles.sessionItemFirst :
-                        isLast ? styles.sessionItemLast : {}
+                        isLast ? styles.sessionItemLast : {},
+                actionsMenu.pressableStyle,
             ]}
             {...sessionPressHandlers}
-            {...menuProps}
+            {...actionsMenu.menuProps}
         >
             <View style={styles.avatarContainer}>
                 <Avatar bot={!!session.botId} id={session.avatarId} size={48} monochrome={!status.isConnected} flavor={session.flavor} clientId={session.clientId} imageUrl={session.avatarUri} thumbhash={session.avatarThumbhash} badgeLocation="sessionList" />
@@ -809,10 +793,8 @@ const SessionItem = React.memo(({ session, selected, isFirst, isLast, isSingle, 
         </Pressable>
         {Platform.OS === 'web' && (
             <SessionActionsPopover
-                anchor={actionsAnchor}
-                onClose={() => setActionsAnchor(null)}
+                {...actionsMenu.popoverProps}
                 sessionId={session.id}
-                visible={!!actionsAnchor}
             />
         )}
         </View>

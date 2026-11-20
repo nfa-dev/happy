@@ -18,13 +18,13 @@ import { findProjectWorktree, locateProjectWorkspace } from '@/utils/projectHome
 import { neighbouringTabId, resolveWorktreeTabs } from '@/utils/worktreeTabs';
 import { newSessionLikeSession } from '@/utils/newSessionCheckout';
 import { useStartSessionFromDraft } from '@/hooks/useStartSessionFromDraft';
-import { useSessionActionAlert } from '@/hooks/useSessionQuickActions';
+import { useSessionActionsMenu } from '@/hooks/useSessionActionsMenu';
 import { useIsTablet } from '@/utils/responsive';
 import { isRunningOnMac } from '@/utils/platform';
 import { trackSessionSwitched } from '@/track';
 import { layout } from './layout';
 import { MobileGlassSurface } from './MobileGlass';
-import { SessionActionsAnchor, SessionActionsPopover } from './SessionActionsPopover';
+import { SessionActionsPopover } from './SessionActionsPopover';
 import { ShimmerText } from './ShimmerText';
 import { StatusDot } from './StatusDot';
 
@@ -404,25 +404,10 @@ const WorktreeTab = React.memo(({ session, selected, neighbourId, onSelect, onAr
     const blocked = session.state === 'permission_required' || session.state === 'input_required';
     const color = selected ? theme.colors.header.tint : theme.colors.textSecondary;
 
-    const [actionsAnchor, setActionsAnchor] = React.useState<SessionActionsAnchor | null>(null);
     const handleBeforeArchive = React.useCallback(() => {
         onArchiving(session.id, neighbourId);
     }, [neighbourId, onArchiving, session.id]);
-    const showActions = useSessionActionAlert(session.id, { onBeforeArchive: handleBeforeArchive });
-
-    const handleContextMenu = React.useCallback((event: any) => {
-        event.preventDefault?.();
-        event.stopPropagation?.();
-        setActionsAnchor({
-            type: 'point',
-            x: event.nativeEvent?.clientX ?? event.nativeEvent?.pageX ?? 0,
-            y: event.nativeEvent?.clientY ?? event.nativeEvent?.pageY ?? 0,
-        });
-    }, []);
-
-    const menuProps = Platform.OS === 'web'
-        ? { onContextMenu: handleContextMenu } as any
-        : { onLongPress: showActions };
+    const actionsMenu = useSessionActionsMenu(session.id, { onBeforeArchive: handleBeforeArchive });
 
     return (
         <View onLayout={(event: LayoutChangeEvent) => onLayoutX(session.id, event.nativeEvent.layout.x, event.nativeEvent.layout.width)}>
@@ -435,8 +420,9 @@ const WorktreeTab = React.memo(({ session, selected, neighbourId, onSelect, onAr
                     styles.tab,
                     selected && styles.tabSelected,
                     pressed && !selected && styles.tabPressed,
+                    actionsMenu.pressableStyle,
                 ]}
-                {...menuProps}
+                {...actionsMenu.menuProps}
             >
                 {/* No harness icon: the strip is the narrowest thing on the
                     screen, and a chat's harness is already named on the
@@ -466,11 +452,9 @@ const WorktreeTab = React.memo(({ session, selected, neighbourId, onSelect, onAr
             </Pressable>
             {Platform.OS === 'web' && (
                 <SessionActionsPopover
-                    anchor={actionsAnchor}
+                    {...actionsMenu.popoverProps}
                     onBeforeArchive={handleBeforeArchive}
-                    onClose={() => setActionsAnchor(null)}
                     sessionId={session.id}
-                    visible={!!actionsAnchor}
                 />
             )}
         </View>

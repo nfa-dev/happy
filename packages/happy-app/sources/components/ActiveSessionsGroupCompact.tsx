@@ -14,8 +14,8 @@ import { t } from '@/text';
 import { useSessionPressHandlers } from '@/hooks/useNavigateToSession';
 import { useHappyAction } from '@/hooks/useHappyAction';
 import { HappyError } from '@/utils/errors';
-import { SessionActionsAnchor, SessionActionsPopover } from './SessionActionsPopover';
-import { useSessionActionAlert } from '@/hooks/useSessionQuickActions';
+import { SessionActionsPopover } from './SessionActionsPopover';
+import { useSessionActionsMenu } from '@/hooks/useSessionActionsMenu';
 import { sessionKill } from '@/sync/ops';
 import { isWorktreePath, getRepoPath, getWorktreeName } from '@/utils/worktree';
 import { useNewSessionDraft } from '@/hooks/useNewSessionDraft';
@@ -235,7 +235,7 @@ export const CompactSessionRow = React.memo(({ session, selected, showBorder }: 
     const sessionPressHandlers = useSessionPressHandlers(session.id);
     const swipeableRef = React.useRef<Swipeable | null>(null);
     const swipeEnabled = Platform.OS !== 'web';
-    const [actionsAnchor, setActionsAnchor] = React.useState<SessionActionsAnchor | null>(null);
+    const actionsMenu = useSessionActionsMenu(session.id);
 
     const [archivingSession, performArchive] = useHappyAction(async () => {
         const result = await sessionKill(session.id);
@@ -248,23 +248,6 @@ export const CompactSessionRow = React.memo(({ session, selected, showBorder }: 
         swipeableRef.current?.close();
         performArchive();
     }, [performArchive]);
-
-    const handleContextMenu = React.useCallback((event: any) => {
-        event.preventDefault?.();
-        event.stopPropagation?.();
-        setActionsAnchor({
-            type: 'point',
-            x: event.nativeEvent.clientX ?? event.nativeEvent.pageX ?? 0,
-            y: event.nativeEvent.clientY ?? event.nativeEvent.pageY ?? 0,
-        });
-    }, []);
-
-    const showActionAlert = useSessionActionAlert(session.id);
-    const menuProps = Platform.OS === 'web' ? {
-        onContextMenu: handleContextMenu,
-    } as any : {
-        onLongPress: showActionAlert,
-    };
 
     const renderTrailingIndicator = () => {
         let indicator: React.ReactNode = null;
@@ -299,10 +282,11 @@ export const CompactSessionRow = React.memo(({ session, selected, showBorder }: 
             style={[
                 styles.sessionRow,
                 showBorder && styles.sessionRowWithBorder,
-                selected && styles.sessionRowSelected
+                selected && styles.sessionRowSelected,
+                actionsMenu.pressableStyle,
             ]}
             {...sessionPressHandlers}
-            {...menuProps}
+            {...actionsMenu.menuProps}
         >
             <View style={styles.sessionContent}>
                 <View style={styles.sessionTitleRow}>
@@ -330,10 +314,8 @@ export const CompactSessionRow = React.memo(({ session, selected, showBorder }: 
             <>
                 {itemContent}
                 <SessionActionsPopover
-                    anchor={actionsAnchor}
-                    onClose={() => setActionsAnchor(null)}
+                    {...actionsMenu.popoverProps}
                     sessionId={session.id}
-                    visible={!!actionsAnchor}
                 />
             </>
         );

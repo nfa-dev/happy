@@ -36,6 +36,8 @@ interface SessionActionsPopoverProps {
     onAfterArchive?: () => void;
     onAfterDelete?: () => void;
     onClose: () => void;
+    /** Opened by a finger's long press: no keyboard to show shortcuts for. */
+    openedByTouch?: boolean;
     sessionId: string;
     visible: boolean;
 }
@@ -152,6 +154,7 @@ export function SessionActionsPopover({
     onAfterDelete,
     onBeforeArchive,
     onClose,
+    openedByTouch = false,
     sessionId,
     visible,
 }: SessionActionsPopoverProps) {
@@ -253,7 +256,7 @@ export function SessionActionsPopover({
                 <Text numberOfLines={1} style={[styles.menuItemLabel, { color }]}>
                     {action.label}
                 </Text>
-                {Platform.OS === 'web' && (
+                {Platform.OS === 'web' && !openedByTouch && (
                     <Text style={styles.menuItemShortcut}>{shortcutLabel}</Text>
                 )}
             </Pressable>
